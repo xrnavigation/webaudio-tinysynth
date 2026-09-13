@@ -19,6 +19,8 @@ jobs:
       - run: npm run check:dist
       - run: npm test
       - run: npm run test:package
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser > browser-test.log 2>&1
   publish:
     needs: validate
     runs-on: ubuntu-latest
