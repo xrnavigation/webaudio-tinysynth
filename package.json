@@ -1,6 +1,6 @@
 {
-  "name": "webaudio-tinysynth",
-  "version": "1.1.4",
+  "name": "@xrnavigation/webaudio-tinysynth",
+  "version": "1.2.0",
   "description": "WebAudio Tiny GM Synthesizer",
   "main": "webaudio-tinysynth.js",
   "keywords": [
@@ -13,22 +13,26 @@
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "terser webaudio-tinysynth.js --output webaudio-tinysynth.min.js --compress --source-map"
+    "test": "node --test test/*.test.cjs",
+    "build": "terser webaudio-tinysynth.js --output webaudio-tinysynth.min.js --compress --source-map",
+    "test:package": "node scripts/check-package.cjs",
+    "check:dist": "npm run build && git diff --exit-code -- webaudio-tinysynth.min.js webaudio-tinysynth.min.js.map"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/g200kg/webaudio-tinysynth.git"
+    "url": "git+https://github.com/xrnavigation/webaudio-tinysynth.git"
   },
   "author": "Tatsuya Shinyagaito",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/g200kg/webaudio-tinysynth/issues"
+    "url": "https://github.com/xrnavigation/webaudio-tinysynth/issues"
   },
-  "homepage": "https://github.com/g200kg/webaudio-tinysynth#readme",
+  "homepage": "https://github.com/xrnavigation/webaudio-tinysynth#readme",
+  "publishConfig": { "registry": "https://npm.pkg.github.com" },
+  "files": ["webaudio-tinysynth.js", "webaudio-tinysynth.min.js", "webaudio-tinysynth.min.js.map", "LICENSE", "README.md"],
   "devDependencies": {
-    "node-minify": "^3.6.0",
-    "terser": "^5.14.0"
+    "terser": "5.44.1",
+    "web-audio-engine": "0.13.4"
   },
   "dependencies": {}
 }

@@ -1,5 +1,4 @@
 .vscode/
-package-lock.json
 
 # Windows image file caches
 Thumbs.db
@@ -9,7 +8,6 @@ ehthumbs.db
 Desktop.ini
 
 # Test file
-test/
 tmp/
 node_modules/
 npm-debug.log
