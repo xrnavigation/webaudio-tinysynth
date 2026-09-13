@@ -4,7 +4,7 @@ const { OfflineAudioContext } = require('web-audio-engine');
 
 // Run the browser distribution unchanged. Timers are deterministic and explicitly
 // driven, so the legacy housekeeping interval cannot leak into the test process.
-function loadSynth(filename, commonjs = true) {
+function loadSynth(filename, commonjs = true, overrides = {}) {
   let seed = 1;
   const math = Object.create(Math);
   math.random = () => ((seed = Math.imul(seed, 1664525) + 1013904223 >>> 0) / 4294967296);
@@ -19,6 +19,7 @@ function loadSynth(filename, commonjs = true) {
     setInterval(fn) { timers.set(++nextTimer, fn); return nextTimer; },
     clearInterval(id) { timers.delete(id); },
   };
+  Object.assign(sandbox, overrides);
   if (commonjs) { sandbox.exports = {}; sandbox.module = { exports: sandbox.exports }; }
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), sandbox, { filename });
   const Synth = commonjs ? sandbox.module.exports : sandbox.WebAudioTinySynth;
