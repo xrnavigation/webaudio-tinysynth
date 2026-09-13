@@ -325,6 +325,39 @@ to GitHub Packages.
 
 ## Installation
 
+### Context and lifecycle
+
+```js
+const synth = new WebAudioTinySynth({ audioContext: sharedContext, destination });
+// MIDI methods remain synchronous and preserve the original instrument definitions.
+synth.send([0x90, 60, 100]);
+await synth.dispose();
+```
+
+`audioContext` is optional; zero-argument construction still creates one context.
+`destination` requires `audioContext`, belongs to that context, and defaults to its
+destination. Injecting a context works with native CommonJS without browser globals.
+The synth never closes an injected context or disconnects a caller's destination.
+
+`setAudioContext(context, destination?)` synchronously stops the previous graph and
+creates the replacement; its returned `Promise<void>` observes closure of any old
+internally owned context. Passing the same internally owned context retains its
+ownership without closing it. Supplying a different context transfers playback to
+that caller-owned context. Calling `init()` twice throws; use `setAudioContext()`
+to rebuild the graph. MIDI sequence playback stops during replacement.
+
+`dispose()` synchronously stops every owned source (including percussion and LFO),
+disconnects owned nodes, aborts pending MIDI reads, removes GUI listeners and clears
+timers. It returns the same `Promise<void>` on repeated calls. The promise waits for
+internally owned context closures and rejects if closure fails; synchronous graph
+cleanup still happens. Subsequent public operations throw `TinySynth is disposed`;
+`ready()` instead returns a rejected promise. Pending reads cannot revive the synth.
+Initialization is synchronous, so `ready()` no longer allocates a polling timer.
+
+The custom element disposes when disconnected. Disposal is permanent: create a new
+element when a new session is needed. Its promise is available through `dispose()`;
+automatic disconnect reports close failures to the console.
+
 Use the same project `.npmrc` configuration as Audiom:
 
 ```ini

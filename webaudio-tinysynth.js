@@ -1,8 +1,68 @@
+/*! WebAudio TinySynth by Tatsuya Shinyagaito, Apache-2.0.
+ * Modified by XR Navigation: explicit audio-context and playback lifecycle ownership.
+ */
 ( function(window){
 "use strict";
 
 function WebAudioTinySynthCore(target) {
+  this._nodes=new Set();
+  this._timers=new Set();
+  this._requests=new Set();
+  this._listeners=[];
+  this._closing=[];
+  this._disposed=false;
+  this._ownedContext=null;
   Object.assign(target,{
+    _createNode:(kind)=>{
+      if(this._disposed) throw new Error("TinySynth is disposed");
+      const node=this.actx["create"+kind]();
+      this._nodes.add(node);
+      return node;
+    },
+    _disconnectNode:(node)=>{
+      node.onended=null;
+      if(node.stop) { try { node.stop(); } catch(e) {} }
+      node.disconnect();
+      this._nodes.delete(node);
+    },
+    _tearDownGraph:()=>{
+      this.playing=0;
+      for(const node of [...this._nodes]) this._disconnectNode(node);
+      this.notetab=[];
+      if(this._ownedContext){
+        const owned=this._ownedContext;
+        this._ownedContext=null;
+        const closing=Promise.resolve().then(()=>owned.close());
+        // Retain errors for dispose/replacement callers without an unhandled rejection.
+        closing.catch(()=>{});
+        this._closing.push(closing);
+      }
+      for(const key of ["actx","audioContext","dest","out","comp","conv","rev","lfo","wave","noiseBuf","convBuf"])
+        this[key]=null;
+      this.chvol=[]; this.chmod=[]; this.chpan=[];
+    },
+    dispose:()=>{
+      if(this._disposePromise) return this._disposePromise;
+      this._disposed=true;
+      this.isReady=0;
+      for(const timer of this._timers) clearInterval(timer);
+      this._timers.clear();
+      for(const request of this._requests){
+        request.onload=request.onerror=request.onabort=request.onloadend=null;
+        request.abort();
+      }
+      this._requests.clear();
+      for(const [element,event,handler] of this._listeners)
+        element.removeEventListener(event,handler,false);
+      this._listeners=[];
+      if(typeof document!=="undefined") document.body.removeEventListener("touchstart",this.preventScroll,false);
+      this._tearDownGraph();
+      this.song=null;
+      this._initialContext=this._initialDestination=null;
+      this.canvas=this.ctx=null;
+      this._disposePromise=Promise.all(this._closing).then(()=>undefined);
+      return this._disposePromise;
+    },
     properties:{
       masterVol:  {type:Number, value:0.5, observer:"setMasterVol"},
       reverbLev:  {type:Number, value:0.3, observer:"setReverbLev"},
@@ -446,16 +506,14 @@ function WebAudioTinySynthCore(target) {
         this.ctx=this.canvas.getContext("2d");
         this.ctx.fillStyle="#000";
         this.ctx.fillRect(0,0,300,32);
-        this.canvas.addEventListener("dragover",this.dragOver.bind(this),false);
-        this.canvas.addEventListener("dragleave",this.dragLeave.bind(this),false);
-        this.canvas.addEventListener("drop",this.execDrop.bind(this),false);
-        this.canvas.addEventListener("click",this.click.bind(this),false);
-        this.canvas.addEventListener("mousedown",this.pointerdown.bind(this),false);
-        this.canvas.addEventListener("mousemove",this.pointermove.bind(this),false);
-        this.canvas.addEventListener("touchstart",this.pointerdown.bind(this),false);
-        this.canvas.addEventListener("touchend",this.pointerup.bind(this),false);
-        this.canvas.addEventListener("touchcancel",this.pointerup.bind(this),false);
-        this.canvas.addEventListener("touchmove",this.pointermove.bind(this),false);
+        for(const [event,method] of [["dragover","dragOver"],["dragleave","dragLeave"],
+          ["drop","execDrop"],["click","click"],["mousedown","pointerdown"],
+          ["mousemove","pointermove"],["touchstart","pointerdown"],["touchend","pointerup"],
+          ["touchcancel","pointerup"],["touchmove","pointermove"]]){
+          const handler=this[method].bind(this);
+          this.canvas.addEventListener(event,handler,false);
+          this._listeners.push([this.canvas,event,handler]);
+        }
       }
     },
     _guiUpdate:()=>{
@@ -634,7 +692,11 @@ function WebAudioTinySynthCore(target) {
       const f = e.dataTransfer.files;
       if(this.disabledrop==0){
         var reader = new FileReader();
+        this._requests.add(reader);
+        reader.onloadend=()=>this._requests.delete(reader);
         reader.onload=function(e){
+          this._requests.delete(reader);
+          if(this._disposed) return;
           this.loadMIDI(reader.result);
         }.bind(this);
         reader.readAsArrayBuffer(f[0]);
@@ -644,22 +706,11 @@ function WebAudioTinySynthCore(target) {
     },
     /*@@guiEND*/
     ready:()=>{
-      return new Promise((resolv)=>{
-        const timerid=setInterval(()=>{
-/*
-          if(this.debug)
-            console.log("Initialize checking.");
-*/
-          if(this.isReady){
-            clearInterval(timerid);
-            if(this.debug)
-              console.log("Initialized.");
-            resolv();
-          }
-        },100);
-      });
+      return this._disposed ? Promise.reject(new Error("TinySynth is disposed")) : Promise.resolve();
     },
     init:()=>{
+      if(this._initialized) throw new Error("TinySynth is already initialized");
+      this._initialized=true;
       this.pg=[]; this.vol=[]; this.ex=[]; this.bend=[]; this.rpnidx=[]; this.brange=[];
       this.sustain=[]; this.notetab=[]; this.rhythm=[];
       this.masterTuningC=0; this.masterTuningF=0; this.tuningC=[]; this.tuningF=[]; this.scaleTuning=[];
@@ -674,8 +725,9 @@ function WebAudioTinySynthCore(target) {
       this.rhythm[9]=1;
       this.preroll=0.2;
       this.relcnt=0;
-      setInterval(
+      this._timers.add(setInterval(
         function(){
+          if(this._disposed) return;
           if(++this.relcnt>=3){
             this.relcnt=0;
             for(let i=this.notetab.length-1;i>=0;--i){
@@ -717,12 +769,18 @@ function WebAudioTinySynthCore(target) {
             }
           }
         }.bind(this),60
-      );
+      ));
       if(this.debug)
         console.log("internalcontext:"+this.internalcontext)
-      if(this.internalcontext){
-        window.AudioContext = window.AudioContext || window.webkitAudioContext;
-        this.setAudioContext(new AudioContext());
+      if(this._initialContext){
+        this.setAudioContext(this._initialContext,this._initialDestination);
+        this._initialContext=this._initialDestination=null;
+      }
+      else if(this.internalcontext){
+        const Context=window.AudioContext || window.webkitAudioContext || globalThis.AudioContext;
+        const context=new Context();
+        this._ownedContext=context;
+        this.setAudioContext(context);
       }
       this.isReady=1;
     },
@@ -795,12 +853,14 @@ function WebAudioTinySynthCore(target) {
       var xhr=new XMLHttpRequest();
       xhr.open("GET",url,true);
       xhr.responseType="arraybuffer";
-      xhr.loadMIDI=this.loadMIDI.bind(this);
-      xhr.onload=function(e){
-        if(this.status==200){
-          this.loadMIDI(this.response);
+      this._requests.add(xhr);
+      xhr.onload=()=>{
+        this._requests.delete(xhr);
+        if(!this._disposed && xhr.status==200){
+          this.loadMIDI(xhr.response);
         }
       };
+      xhr.onloadend=()=>this._requests.delete(xhr);
       xhr.send();
     },
     reset:()=>{
@@ -828,8 +888,9 @@ function WebAudioTinySynthCore(target) {
     playMIDI:()=>{
       if(!this.song)
         return;
-      const dummy=this.actx.createOscillator();
-      dummy.connect(this.actx.destination);
+      const dummy=this._createNode("Oscillator");
+      dummy.connect(this.dest);
+      dummy.onended=()=>this._disconnectNode(dummy);
       dummy.frequency.value=0;
       dummy.start(0);
       dummy.stop(this.actx.currentTime+0.001);
@@ -998,6 +1059,8 @@ function WebAudioTinySynthCore(target) {
           } catch (e) {}
         }
         nt.g[k].gain.value = 0;
+        this._disconnectNode(nt.o[k]);
+        this._disconnectNode(nt.g[k]);
       }
     },
     _limitVoices:(ch,n)=>{
@@ -1032,7 +1095,7 @@ function WebAudioTinySynthCore(target) {
           out=o[pn.g-1].playbackRate, sc=fp[pn.g-1]/440, fp[i]=fp[pn.g-1]*pn.t+pn.f;
         switch(pn.w[0]){
         case "n":
-          o[i]=this.actx.createBufferSource();
+          o[i]=this._createNode("BufferSource");
           o[i].buffer=this.noiseBuf[pn.w];
           o[i].loop=true;
           o[i].playbackRate.value=fp[i]/440;
@@ -1044,7 +1107,7 @@ function WebAudioTinySynthCore(target) {
           }
           break;
         default:
-          o[i]=this.actx.createOscillator();
+          o[i]=this._createNode("Oscillator");
           o[i].frequency.value=fp[i];
           if(pn.p!=1)
             this._setParamTarget(o[i].frequency,fp[i]*pn.p,t,pn.q);
@@ -1058,7 +1121,7 @@ function WebAudioTinySynthCore(target) {
           }
           break;
         }
-        g[i]=this.actx.createGain();
+        g[i]=this._createNode("Gain");
         r[i]=pn.r;
         o[i].connect(g[i]); g[i].connect(out);
         vp[i]=sc*pn.v;
@@ -1080,6 +1143,8 @@ function WebAudioTinySynthCore(target) {
               if (o[i].detune) this.chmod[ch].disconnect(o[i].detune);
             }
             catch(e){}
+            this._disconnectNode(o[i]);
+            this._disconnectNode(g[i]);
           };
           o[i].stop(t+p[0].d*this.releaseRatio);
         }
@@ -1321,6 +1386,12 @@ function WebAudioTinySynthCore(target) {
       return this.actx;
     },
     setAudioContext:(actx,dest)=>{
+      if(!actx || typeof actx.createGain!=="function" || actx.state==="closed" || (dest && dest.context!==actx))
+        throw new TypeError("A live AudioContext and a destination belonging to it are required");
+      const keepOwned=this._ownedContext===actx;
+      if(keepOwned) this._ownedContext=null;
+      this._tearDownGraph();
+      if(keepOwned) this._ownedContext=actx;
       this.audioContext=this.actx=actx;
       this.dest=dest;
       if(!dest)
@@ -1328,8 +1399,8 @@ function WebAudioTinySynthCore(target) {
       this.tsdiff=performance.now()*.001-this.actx.currentTime;
       if(this.debug)
         console.log("TSDiff:"+this.tsdiff);
-      this.out=this.actx.createGain();
-      this.comp=this.actx.createDynamicsCompressor();
+      this.out=this._createNode("Gain");
+      this.comp=this._createNode("DynamicsCompressor");
       var blen=this.actx.sampleRate*.5|0;
       this.convBuf=this.actx.createBuffer(2,blen,this.actx.sampleRate);
       this.noiseBuf={};
@@ -1355,9 +1426,9 @@ function WebAudioTinySynthCore(target) {
         }
       }
       if(this.useReverb){
-        this.conv=this.actx.createConvolver();
+        this.conv=this._createNode("Convolver");
         this.conv.buffer=this.convBuf;
-        this.rev=this.actx.createGain();
+        this.rev=this._createNode("Gain");
         this.rev.gain.value=this.reverbLev;
         this.out.connect(this.conv);
         this.conv.connect(this.rev);
@@ -1368,13 +1439,13 @@ function WebAudioTinySynthCore(target) {
       this.comp.connect(this.dest);
       this.chvol=[]; this.chmod=[]; this.chpan=[];
       this.wave={"w9999":this._createWave("w9999")};
-      this.lfo=this.actx.createOscillator();
+      this.lfo=this._createNode("Oscillator");
       this.lfo.frequency.value=5;
       this.lfo.start(0);
       for(let i=0;i<16;++i){
-        this.chvol[i]=this.actx.createGain();
+        this.chvol[i]=this._createNode("Gain");
         if(this.actx.createStereoPanner){
-          this.chpan[i]=this.actx.createStereoPanner();
+          this.chpan[i]=this._createNode("StereoPanner");
           this.chvol[i].connect(this.chpan[i]);
           this.chpan[i].connect(this.out);
         }
@@ -1382,7 +1453,7 @@ function WebAudioTinySynthCore(target) {
           this.chpan[i]=null;
           this.chvol[i].connect(this.out);
         }
-        this.chmod[i]=this.actx.createGain();
+        this.chmod[i]=this._createNode("Gain");
         this.lfo.connect(this.chmod[i]);
         this.pg[i]=0;
         this.resetAllControllers(i);
@@ -1391,8 +1462,20 @@ function WebAudioTinySynthCore(target) {
       this.reset();
       this.send([0x90,60,1]);
       this.send([0x90,60,0]);
+      const completion=Promise.all(this._closing).then(()=>undefined);
+      completion.catch(()=>{});
+      return completion;
     },
   });
+  for(const key of Object.keys(target)){
+    if(typeof target[key]==="function" && key[0]!=="_" && key!=="dispose" && key!=="ready"){
+      const operation=target[key];
+      target[key]=(...args)=>{
+        if(this._disposed) throw new Error("TinySynth is disposed");
+        return operation(...args);
+      };
+    }
+  }
 }
 if(window && window.customElements){
   class WebAudioTinySynthElement extends HTMLElement {
@@ -1400,6 +1483,7 @@ if(window && window.customElements){
       super();
     }
     connectedCallback(){
+      if(this._initialized) return;
       const div = document.createElement("div");
       div.innerHTML=
   `<canvas
@@ -1463,9 +1547,13 @@ if(window && window.customElements){
         this[k] = this.getAttr(k,v.value);
       }
       this.setQuality(1);
-      this.init();
+      try { this.init(); }
+      catch(error){ this.dispose().catch(()=>{}); throw error; }
       this._guiInit.bind(this)();
-      setInterval(this._guiUpdate.bind(this),100);
+      this._timers.add(setInterval(()=>{ if(!this._disposed) this._guiUpdate(); },100));
+    }
+    disconnectedCallback(){
+      if(this.dispose) this.dispose().catch(error=>console.error(error));
     }
   }
   window.customElements.define('webaudio-tinysynth', WebAudioTinySynthElement);
@@ -1479,6 +1567,8 @@ class WebAudioTinySynth {
     }
     this.setQuality(1);
     if(opt){
+      this._initialContext=opt.audioContext;
+      this._initialDestination=opt.destination;
       if(opt.useReverb!=undefined)
         this.useReverb=opt.useReverb;
       if(opt.quality!=undefined)
@@ -1486,7 +1576,10 @@ class WebAudioTinySynth {
       if(opt.voices!=undefined)
         this.setVoices(opt.voices);
     }
-    this.init();
+    if(this._initialDestination && !this._initialContext)
+      throw new TypeError("destination requires audioContext");
+    try { this.init(); }
+    catch(error){ this.dispose().catch(()=>{}); throw error; }
   }
 }
 
