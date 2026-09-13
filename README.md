@@ -317,3 +317,42 @@ You can test how these parameter work with 'Timbre Editor' panel in 'soundedit.h
 ## License
 
 Licensed under the Apache License, Version 2.0
+# XR Navigation fork
+
+This Apache-2.0 fork preserves TinySynth's generated GM instruments and browser
+and CommonJS distribution. It is published as `@xrnavigation/webaudio-tinysynth`
+to GitHub Packages.
+
+## Installation
+
+Use the same project `.npmrc` configuration as Audiom:
+
+```ini
+@xrnavigation:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NPM_TOKEN}
+```
+
+Set `NPM_TOKEN` outside the repository to a GitHub token with `read:packages`
+and access to the package (including organization SSO authorization if required),
+then run `npm install @xrnavigation/webaudio-tinysynth`. Never commit a token.
+An existing Audiom checkout with this registry configuration needs no additional
+registry setup; ordinary `npm install` resolves the scoped package.
+
+## Development and releases
+
+Use Node 22 or 24 and `npm ci`, then `npm test`, `npm run build`, and
+`npm run test:package`. Commit the lockfile and both generated distribution files.
+`npm run check:dist` checks that rebuilding produces the committed distribution.
+The packed-artifact check installs the actual tarball into a temporary consumer
+and exercises both CommonJS and browser entry points.
+
+The deterministic test harness uses real offline Web Audio rendering with seeded
+noise and controlled housekeeping timers. Its `resume()` override only bypasses
+browser unlocking; it does not stub the audio graph or rendered samples.
+
+CI validates pull requests and master on both supported Node versions. To release,
+update the package version and lockfile in a reviewed commit, then push the matching
+`v<version>` tag. The tag workflow validates the distribution and packed install,
+publishes using its `GITHUB_TOKEN` with `packages:write`, then creates a GitHub
+release. Tags that do not match `package.json` fail before publication. Versions
+are immutable; release a new version instead of replacing an existing package.
