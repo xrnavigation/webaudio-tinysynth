@@ -4,15 +4,13 @@ const { OfflineAudioContext } = require('web-audio-engine');
 
 // Run the browser distribution unchanged. Timers are deterministic and explicitly
 // driven, so the legacy housekeeping interval cannot leak into the test process.
-function loadSynth(filename, commonjs = true, overrides = {}) {
+function loadSynth(filename, commonjs = true, overrides = {}, duration = 1) {
   let seed = 1;
   const math = Object.create(Math);
   math.random = () => ((seed = Math.imul(seed, 1664525) + 1013904223 >>> 0) / 4294967296);
   const timers = new Map();
   let nextTimer = 0;
-  const context = new OfflineAudioContext(2, 22050, 22050);
-  // Browser unlock requests are irrelevant offline; rendering starts explicitly.
-  context.resume = () => Promise.resolve();
+  const context = new OfflineAudioContext(2, 22050 * duration, 22050);
   const sandbox = {
     Math: math, performance: { now: () => 0 }, console,
     AudioContext: function () { return context; },

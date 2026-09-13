@@ -325,6 +325,52 @@ to GitHub Packages.
 
 ## Installation
 
+### Independently owned notes
+
+```js
+const voice = synth.playNote({
+  program: 73, note: 60, velocity: 100, gain: 0.5,
+  destination: myPanner, startTime: context.currentTime, duration: 0.25,
+});
+voice.gain = 0;       // linear category gain; velocity/timbre stay unchanged
+voice.release();     // begin this instrument's natural release envelope
+voice.stop();        // immediately silence every partial, including release tails
+await voice.ended;   // all nodes have been released
+```
+
+`program`, `note` and `velocity` are integer MIDI values 0–127. Program and note
+are required; velocity defaults to 100 and gain to 1. Gain is finite, nonnegative
+and linear. Velocity zero is valid and silent. Voice configuration never changes
+MIDI channels, programs, tuning, controllers, sustain or the shared sequence cursor.
+MIDI channel operations cannot alter these voices. The existing `voices` limit
+applies only to MIDI notes: additive voices have no automatic stealing or admission
+limit. The application owns their count and lifetime.
+
+`startTime` is absolute AudioContext seconds (past times start now); `duration` is
+optional seconds from accepted start to release. Both must be finite and nonnegative.
+Without duration a voice sustains until released, stopped, or its synth is disposed
+or reconfigured. Timing ignores MIDI timestamp mode. `release(time?)` defaults to
+now, uses each partial's attack/hold/decay state and release constant, and schedules
+cleanup after that partial's release tail. An earlier release can replace a future
+one; repeated later releases do not prolong it. Releasing before a future start
+cancels the voice. `stop()` always silences immediately, even after scheduling a
+future start, duration or release. `ended` resolves on natural completion or stop;
+retained ended handles are inert and cannot affect later voices. `state` is one of
+`scheduled`, `playing`, `releasing`, or `ended`.
+
+Without `destination`, voices route through the synth's master gain, compressor
+and optional reverb. An explicit same-context AudioNode receives the **dry** voice
+and bypasses those shared controls; the caller supplies any desired downstream
+master gain, effects and spatial panner. That destination is never disconnected by
+voice cleanup. The optional reverb may retain an already emitted tail on the shared
+default route; immediate stop disconnects the voice's sources, not other callers'
+shared effect output. Use a caller-owned dry route for independently managed effects.
+No sample bank or extra AudioContext is loaded for these voices.
+
+TypeScript declarations ship with the package for the voice API, lifecycle and MIDI
+operations. Invalid options throw before node allocation; a failed graph construction
+releases its partial allocations without interrupting existing voices.
+
 ### Context and lifecycle
 
 ```js
@@ -380,8 +426,10 @@ The packed-artifact check installs the actual tarball into a temporary consumer
 and exercises both CommonJS and browser entry points.
 
 The deterministic test harness uses real offline Web Audio rendering with seeded
-noise and controlled housekeeping timers. Its `resume()` override only bypasses
-browser unlocking; it does not stub the audio graph or rendered samples.
+noise and controlled housekeeping timers. Native Chromium integration verifies
+scheduled stop replacement and completion using the browser's unmodified audio
+engine. Install it with `npx playwright install chromium`, then run
+`npm run test:browser`. CI installs Chromium and runs these checks automatically.
 
 CI validates pull requests and master on both supported Node versions. To release,
 update the package version and lockfile in a reviewed commit, then push the matching

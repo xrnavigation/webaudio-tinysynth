@@ -21,3 +21,10 @@ jobs:
       - run: npm run check:dist
       - run: npm test
       - run: npm run test:package
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser > browser-test.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-log-node-${{ matrix.node }}
+          path: browser-test.log

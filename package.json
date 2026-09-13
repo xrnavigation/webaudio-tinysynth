@@ -3,6 +3,7 @@
   "version": "1.2.0",
   "description": "WebAudio Tiny GM Synthesizer",
   "main": "webaudio-tinysynth.js",
+  "types": "webaudio-tinysynth.d.ts",
   "keywords": [
     "midi",
     "webaudio",
@@ -16,6 +17,7 @@
     "test": "node --test test/*.test.cjs",
     "build": "terser webaudio-tinysynth.js --output webaudio-tinysynth.min.js --compress --source-map",
     "test:package": "node scripts/check-package.cjs",
+    "test:browser": "node scripts/check-browser.cjs",
     "check:dist": "npm run build && git diff --exit-code -- webaudio-tinysynth.min.js webaudio-tinysynth.min.js.map"
   },
   "repository": {
@@ -28,11 +30,21 @@
     "url": "https://github.com/xrnavigation/webaudio-tinysynth/issues"
   },
   "homepage": "https://github.com/xrnavigation/webaudio-tinysynth#readme",
-  "publishConfig": { "registry": "https://npm.pkg.github.com" },
-  "files": ["webaudio-tinysynth.js", "webaudio-tinysynth.min.js", "webaudio-tinysynth.min.js.map", "LICENSE", "README.md"],
-  "devDependencies": {
-    "terser": "5.44.1",
-    "web-audio-engine": "0.13.4"
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
-  "dependencies": {}
+  "files": [
+    "webaudio-tinysynth.js",
+    "webaudio-tinysynth.min.js",
+    "webaudio-tinysynth.min.js.map",
+    "webaudio-tinysynth.d.ts",
+    "LICENSE",
+    "README.md"
+  ],
+  "devDependencies": {
+    "playwright": "1.56.1",
+    "terser": "5.44.1",
+    "typescript": "5.9.3",
+    "web-audio-engine": "0.13.4"
+  }
 }

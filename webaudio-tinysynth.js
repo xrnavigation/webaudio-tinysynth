@@ -6,6 +6,7 @@
 
 function WebAudioTinySynthCore(target) {
   this._nodes=new Set();
+  this._voices=new Set();
   this._timers=new Set();
   this._requests=new Set();
   this._listeners=[];
@@ -27,6 +28,7 @@ function WebAudioTinySynthCore(target) {
     },
     _tearDownGraph:()=>{
       this.playing=0;
+      for(const voice of [...this._voices]) voice.stop();
       for(const node of [...this._nodes]) this._disconnectNode(node);
       this.notetab=[];
       if(this._ownedContext){
@@ -1078,15 +1080,22 @@ function WebAudioTinySynthCore(target) {
       }
     },
     _note:(t,ch,n,v,p)=>{
-      let out,sc,pn;
-      const o=[],g=[],vp=[],fp=[],r=[];
       const f=440*Math.pow(2,(n-69 + this.masterTuningC + this.tuningC[ch] + (this.masterTuningF + this.tuningF[ch]/8192 + this.scaleTuning[ch][n%12]))/12);
       this._limitVoices(ch,n);
+      const parts=this._buildPartials(t,n,v,p,f,this.chvol[ch],this.chmod[ch],this.bend[ch],this.rhythm[ch]);
+      if(!this.rhythm[ch])
+        this.notetab.push({t:t,e:99999,ch:ch,n:n,o:parts.o,g:parts.g,t2:t+parts.last.a,v:parts.v,r:parts.r,f:0});
+    },
+    _buildPartials:(t,n,v,p,f,destination,modulation,bend,rhythm)=>{
+      let out,sc,pn;
+      const o=[],g=[],vp=[],fp=[],r=[];
+      const before=new Set(this._nodes);
+      try {
       for(let i=0;i<p.length;++i){
         pn=p[i];
         const dt=t+pn.a+pn.h;
         if(pn.g==0)
-          out=this.chvol[ch], sc=v*v/16384, fp[i]=f*pn.t+pn.f;
+          out=destination, sc=v*v/16384, fp[i]=f*pn.t+pn.f;
         else if(pn.g>10)
           out=g[pn.g-11].gain, sc=1, fp[i]=fp[pn.g-11]*pn.t+pn.f;
         else if(o[pn.g-1].frequency)
@@ -1101,9 +1110,9 @@ function WebAudioTinySynthCore(target) {
           o[i].playbackRate.value=fp[i]/440;
           if(pn.p!=1)
             this._setParamTarget(o[i].playbackRate,fp[i]/440*pn.p,t,pn.q);
-          if (o[i].detune) {
-            this.chmod[ch].connect(o[i].detune);
-            o[i].detune.value=this.bend[ch];
+          if (o[i].detune && modulation) {
+            modulation.connect(o[i].detune);
+            o[i].detune.value=bend;
           }
           break;
         default:
@@ -1115,9 +1124,9 @@ function WebAudioTinySynthCore(target) {
             o[i].setPeriodicWave(this.wave[pn.w]);
           else
             o[i].type=pn.w;
-          if (o[i].detune) {
-            this.chmod[ch].connect(o[i].detune);
-            o[i].detune.value=this.bend[ch];
+          if (o[i].detune && modulation) {
+            modulation.connect(o[i].detune);
+            o[i].detune.value=bend;
           }
           break;
         }
@@ -1136,11 +1145,11 @@ function WebAudioTinySynthCore(target) {
           g[i].gain.setValueAtTime(vp[i],t);
         this._setParamTarget(g[i].gain,pn.s*vp[i],dt,pn.d);
         o[i].start(t);
-        if(this.rhythm[ch]){
+        if(rhythm){
 
           o[i].onended = ()=>{
             try {
-              if (o[i].detune) this.chmod[ch].disconnect(o[i].detune);
+              if (o[i].detune && modulation) modulation.disconnect(o[i].detune);
             }
             catch(e){}
             this._disconnectNode(o[i]);
@@ -1149,8 +1158,78 @@ function WebAudioTinySynthCore(target) {
           o[i].stop(t+p[0].d*this.releaseRatio);
         }
       }
-      if(!this.rhythm[ch])
-        this.notetab.push({t:t,e:99999,ch:ch,n:n,o:o,g:g,t2:t+pn.a,v:vp,r:r,f:0});
+      return {o:o,g:g,v:vp,r:r,last:pn,envelopes:p};
+      } catch(error) {
+        for(const node of [...this._nodes]) if(!before.has(node)) this._disconnectNode(node);
+        throw error;
+      }
+    },
+    playNote:(options)=>{
+      const {program,note,velocity=100,gain=1,destination=this.out,startTime=this.actx.currentTime,duration}=options||{};
+      const valid=(value,min,max)=>Number.isFinite(value) && value>=min && value<=max;
+      if(!Number.isInteger(program) || !valid(program,0,127) || !Number.isInteger(note) || !valid(note,0,127) ||
+        !Number.isInteger(velocity) || !valid(velocity,0,127) || !valid(gain,0,Number.MAX_VALUE) ||
+        !valid(startTime,0,Number.MAX_VALUE) || (duration!==undefined && !valid(duration,0,Number.MAX_VALUE)))
+        throw new RangeError("Invalid voice options");
+      if(!destination || destination.context!==this.actx || typeof destination.connect!=="function")
+        throw new TypeError("Voice destination must be an AudioNode in the synth AudioContext");
+      let owner=this, context=this.actx, level=gain, root=null, parts=null;
+      const start=Math.max(startTime,context.currentTime);
+      if(duration!==undefined && !Number.isFinite(start+duration)) throw new RangeError("Invalid duration");
+      let finished=false, releaseAt=Infinity, resolveEnded;
+      const ended=new Promise(resolve=>{resolveEnded=resolve;});
+      const finish=()=>{
+        if(finished) return;
+        finished=true;
+        if(parts) for(const node of [...parts.o,...parts.g]) owner._disconnectNode(node);
+        if(root) owner._disconnectNode(root);
+        owner._voices.delete(voice);
+        parts=root=owner=context=null;
+        resolveEnded(); resolveEnded=null;
+      };
+      const voice={
+        get state(){ return finished ? "ended" : context.currentTime<start ? "scheduled" : context.currentTime>=releaseAt ? "releasing" : "playing"; },
+        get gain(){ return level; },
+        set gain(value){
+          if(finished) return;
+          if(!valid(value,0,Number.MAX_VALUE)) throw new RangeError("Invalid gain");
+          root.gain.setValueAtTime(value,context.currentTime); level=value;
+        },
+        ended,
+        stop:()=>finish(),
+        release:(time)=>{
+          if(finished) return;
+          if(time===undefined) time=context.currentTime;
+          if(!valid(time,0,Number.MAX_VALUE)) throw new RangeError("Invalid release time");
+          time=Math.max(time,context.currentTime);
+          if(time<start) { finish(); return; }
+          if(time>=releaseAt) return;
+          releaseAt=time;
+          for(let i=0;i<parts.o.length;i++){
+            const p=parts.envelopes[i], peak=parts.v[i];
+            const elapsed=time-start;
+            let value=peak;
+            if(elapsed<p.a) value=peak*elapsed/p.a;
+            else if(elapsed>=p.a+p.h) value=p.d===0 ? p.s*peak : p.s*peak+(peak-p.s*peak)*Math.exp(-(elapsed-p.a-p.h)/p.d);
+            const parameter=parts.g[i].gain;
+            parameter.cancelScheduledValues(time);
+            parameter.setValueAtTime(value,time);
+            owner._setParamTarget(parameter,0,time,p.r);
+            parts.o[i].stop(time+p.r*owner.releaseRatio);
+          }
+        },
+      };
+      try {
+        root=this._createNode("Gain");
+        root.gain.value=gain;
+        root.connect(destination);
+        parts=this._buildPartials(start,note,velocity,this.program[program].p,440*Math.pow(2,(note-69)/12),root,null,0,false);
+        let remaining=parts.o.length;
+        for(const oscillator of parts.o) oscillator.onended=()=>{ if(--remaining===0) finish(); };
+        this._voices.add(voice);
+        if(duration!==undefined) voice.release(start+duration);
+        return voice;
+      } catch(error) { finish(); throw error; }
     },
     _setParamTarget:(p,v,t,d)=>{
       if(d!=0)
@@ -1283,7 +1362,7 @@ function WebAudioTinySynthCore(target) {
       const cmd=msg[0]&~0xf;
       if(cmd<0x80||cmd>=0x100)
         return;
-      if(this.audioContext.state=="suspended"){
+      if(this.audioContext.state=="suspended" && typeof this.audioContext.startRendering!=="function"){
         this.audioContext.resume();
       }
       switch(cmd){
