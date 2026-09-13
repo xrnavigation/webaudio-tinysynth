@@ -55,7 +55,7 @@ function WebAudioTinySynthCore(target) {
       for(const [element,event,handler] of this._listeners)
         element.removeEventListener(event,handler,false);
       this._listeners=[];
-      if(typeof document!=="undefined") document.body.removeEventListener("touchstart",this.preventScroll,false);
+      if(typeof document!=="undefined" && document.body) document.body.removeEventListener("touchstart",this.preventScroll,false);
       this._tearDownGraph();
       this.song=null;
       this._initialContext=this._initialDestination=null;

@@ -202,3 +202,16 @@ test('custom element disconnect clears GUI listeners, timers and owned context',
   element.connectedCallback();
   assert.equal(timers.size, 0, 'disposed elements do not resurrect on reconnection');
 });
+
+test('head-script disposal works before document.body exists', async () => {
+  const { ctx, nodes } = context();
+  const { Synth, timers } = loadSynth(source, true, {
+    AudioContext: function () { return ctx; }, document: { body: null },
+  });
+  const synth = new Synth({ useReverb: 0 });
+  synth.send([0x90, 60, 100]);
+  await synth.dispose();
+  assert.equal(timers.size, 0);
+  assert.equal(ctx.closed, 1);
+  assert.ok(nodes.every(node => node.disconnections > 0));
+});
