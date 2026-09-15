@@ -94,17 +94,40 @@ function Init(){
       ProgChange(0);
   });
 }
+const midiNotes = new Map();
 function MidiIn(e){
   if(synth){
-    switch(e.data[0]&0xf0){
+    const message = Array.from(e.data);
+    const command = message[0]&0xf0;
+    if(message[0]===0xff) midiNotes.clear();
+    else if(command===0xb0 && (message[1]===120 || message[1]>=123 && message[1]<=127)){
+      for(const key of midiNotes.keys())
+        if(Math.floor(key/128)===(message[0]&15)) midiNotes.delete(key);
+    }
+    switch(command){
     case 0x90:
       kb.setNote(e.data[2]?1:0,e.data[1]);
       break;
     case 0x80:
       kb.setNote(0,e.data[1]);
     }
-    e.data[1]=e.data[1]+curOct*12;
-    synth.send(e.data,0);
+    if(command===0x80 || command===0x90 || command===0xa0){
+      const key = (message[0]&15)*128+message[1];
+      let notes = midiNotes.get(key);
+      let note = message[1]+curOct*12;
+      if(note<0 || note>127) note=null;
+      if(command===0x90 && message[2]>0){
+        if(!notes) midiNotes.set(key,notes=[]);
+        notes.push(note);
+      }
+      else if(notes){
+        note = command===0xa0 ? notes[notes.length-1] : notes.shift();
+        if(!notes.length) midiNotes.delete(key);
+      }
+      if(note===null) return;
+      message[1]=note;
+    }
+    synth.send(message,0);
   }
 }
 function SelectMidi(n){
