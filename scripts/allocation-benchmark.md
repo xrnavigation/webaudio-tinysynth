@@ -15,8 +15,9 @@ Measured on Windows with Node 22.18.0 and web-audio-engine 0.13.4:
 
 Each value is the median of seven samples of 200 `playNote` constructions using
 program 0. Both sources run in the same process, alternating measurement order.
-Each source/count gets 200 warmup constructions; stop and explicit GC occur
-outside measured intervals. Context initialization and audio rendering are
+Each source/count gets 200 warmup constructions; stop and explicit pre-round GC
+occur outside measured intervals. Allocation-triggered GC may occur within
+`playNote` and is included if it does. Context initialization and audio rendering are
 excluded. The test harness seeds only each synth's VM, never process-global RNG.
 
 There is no measured benefit at low polyphony in this run. At 500/1000 voices the

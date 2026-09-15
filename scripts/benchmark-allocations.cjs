@@ -1,6 +1,7 @@
 // Run with one or more source paths, e.g. baseline.js webaudio-tinysynth.js.
 // Uses real web-audio-engine nodes; measures playNote construction only, without
-// rendering, initialization, stop, or GC time. Never changes process-global RNG.
+// rendering, initialization, stop, or explicit pre-round GC time. Allocation-
+// triggered GC may occur inside playNote. Never changes process-global RNG.
 const path = require('node:path');
 const { performance } = require('node:perf_hooks');
 const { loadSynth } = require('../test/harness.cjs');
