@@ -766,7 +766,7 @@ function WebAudioTinySynthCore(target) {
                 this.tick2Time=4*60/this.song.tempo/this.song.timebase;
               }
               else
-                this.send(e.m,this.playTime);
+                this._sendAtAudioTime(e.m,this.playTime);
               ++this.playIndex;
               if(this.playIndex>=this.song.ev.length){
                 this.playTime+=(this.maxTick-this.playTick)*this.tick2Time;
@@ -1156,24 +1156,24 @@ function WebAudioTinySynthCore(target) {
       nt.e=t+Math.max(...nt.r)*this.releaseRatio;
       nt.f=1;
     },
-    setModulation:(ch,v,t)=>{
-      this.chmod[ch].gain.setValueAtTime(v*100/127,this._tsConv(t));
+    setModulation:(ch,v,t,audioTime)=>{
+      this.chmod[ch].gain.setValueAtTime(v*100/127,this._tsConv(t,audioTime));
     },
-    setChVol:(ch,v,t)=>{
+    setChVol:(ch,v,t,audioTime)=>{
       this.vol[ch]=3*v*v/(127*127);
-      this.chvol[ch].gain.setValueAtTime(this.vol[ch]*this.ex[ch],this._tsConv(t));
+      this.chvol[ch].gain.setValueAtTime(this.vol[ch]*this.ex[ch],this._tsConv(t,audioTime));
     },
-    setPan:(ch,v,t)=>{
+    setPan:(ch,v,t,audioTime)=>{
       if(this.chpan[ch])
-        this.chpan[ch].pan.setValueAtTime((v-64)/64,this._tsConv(t));
+        this.chpan[ch].pan.setValueAtTime((v-64)/64,this._tsConv(t,audioTime));
     },
-    setExpression:(ch,v,t)=>{
+    setExpression:(ch,v,t,audioTime)=>{
       this.ex[ch]=v*v/(127*127);
-      this.chvol[ch].gain.setValueAtTime(this.vol[ch]*this.ex[ch],this._tsConv(t));
+      this.chvol[ch].gain.setValueAtTime(this.vol[ch]*this.ex[ch],this._tsConv(t,audioTime));
     },
-    setSustain:(ch,v,t)=>{
+    setSustain:(ch,v,t,audioTime)=>{
       this.sustain[ch]=v;
-      t=this._tsConv(t);
+      t=this._tsConv(t,audioTime);
       if(v<64){
         for(let i=this.notetab.length-1;i>=0;--i){
           const nt=this.notetab[i];
@@ -1191,8 +1191,8 @@ function WebAudioTinySynthCore(target) {
         }
       }
     },
-    _allNotesOff:(ch,t)=>{
-      t=this._tsConv(t);
+    _allNotesOff:(ch,t,audioTime)=>{
+      t=this._tsConv(t,audioTime);
       for(const nt of this.notetab){
         if(nt.ch===ch && !nt.rhythm && !nt.f && t>=nt.t){
           nt.f=1;
@@ -1229,7 +1229,8 @@ function WebAudioTinySynthCore(target) {
         console.log("Pg("+ch+")="+v);
       this.pg[ch]=v;
     },
-    _tsConv:(t)=>{
+    _tsConv:(t,audioTime)=>{
+      if(audioTime) return t;
       if(t==undefined||t<=0){
         t=0;
         if(this.actx)
@@ -1241,8 +1242,8 @@ function WebAudioTinySynthCore(target) {
       }
       return t;
     },
-    setBend:(ch,v,t)=>{
-      t=this._tsConv(t);
+    setBend:(ch,v,t,audioTime)=>{
+      t=this._tsConv(t,audioTime);
       const br=this.brange[ch]*100/127;
       this.bend[ch]=(v-8192)*br/8192;
       for(let i=this.notetab.length-1;i>=0;--i){
@@ -1254,8 +1255,8 @@ function WebAudioTinySynthCore(target) {
         }
       }
     },
-    noteOff:(ch,n,t)=>{
-      t=this._tsConv(t);
+    noteOff:(ch,n,t,audioTime)=>{
+      t=this._tsConv(t,audioTime);
       for(let i=this.notetab.length-1;i>=0;--i){
         const nt=this.notetab[i];
         if(t>=nt.t && nt.ch==ch && nt.n==n && nt.f==0 && !nt.rhythm){
@@ -1265,12 +1266,12 @@ function WebAudioTinySynthCore(target) {
         }
       }
     },
-    noteOn:(ch,n,v,t)=>{
+    noteOn:(ch,n,v,t,audioTime)=>{
       if(v==0){
-        this.noteOff(ch,n,t);
+        this.noteOff(ch,n,t,audioTime);
         return;
       }
-      t=this._tsConv(t);
+      t=this._tsConv(t,audioTime);
       if(this.rhythm[ch]){
         if(n>=35&&n<=81)
           this._note(t,ch,n,v,this.drummap[n-35].p);
@@ -1281,7 +1282,13 @@ function WebAudioTinySynthCore(target) {
     setTsMode:(tsmode)=>{
       this.tsmode=tsmode;
     },
-    send:(msg,t)=>{    /* send midi message */
+    send:(msg,t)=>{
+      this._dispatchMIDI(msg,t,false);
+    },
+    _sendAtAudioTime:(msg,t)=>{
+      this._dispatchMIDI(msg,t,true);
+    },
+    _dispatchMIDI:(msg,t,audioTime)=>{
       const ch=msg[0]&0xf;
       const cmd=msg[0]&~0xf;
       if(cmd<0x80||cmd>=0x100)
@@ -1292,11 +1299,11 @@ function WebAudioTinySynthCore(target) {
       switch(cmd){
       case 0xb0:  /* ctl change */
         switch(msg[1]){
-        case 1:  this.setModulation(ch,msg[2],t); break;
-        case 7:  this.setChVol(ch,msg[2],t); break;
-        case 10: this.setPan(ch,msg[2],t); break;
-        case 11: this.setExpression(ch,msg[2],t); break;
-        case 64: this.setSustain(ch,msg[2],t); break;
+        case 1:  this.setModulation(ch,msg[2],t,audioTime); break;
+        case 7:  this.setChVol(ch,msg[2],t,audioTime); break;
+        case 10: this.setPan(ch,msg[2],t,audioTime); break;
+        case 11: this.setExpression(ch,msg[2],t,audioTime); break;
+        case 64: this.setSustain(ch,msg[2],t,audioTime); break;
         case 98:  case 99: this.rpnidx[ch]=0x3fff; break; /* nrpn lsb/msb */
         case 100: this.rpnidx[ch]=(this.rpnidx[ch]&0x3f80)|msg[2]; break; /* rpn lsb */
         case 101: this.rpnidx[ch]=(this.rpnidx[ch]&0x7f)|(msg[2]<<7); break; /* rpn msb */
@@ -1329,15 +1336,15 @@ function WebAudioTinySynthCore(target) {
           break;
         case 123:  /* all notes off */
         case 124: case 125: case 126: case 127: /* omni off/on mono/poly */
-          this._allNotesOff(ch,t);
+          this._allNotesOff(ch,t,audioTime);
           break;
         case 121: this.resetAllControllers(ch); break;
         }
         break;
       case 0xc0: this.setProgram(ch,msg[1]); break;
-      case 0xe0: this.setBend(ch,(msg[1]+(msg[2]<<7)),t); break;
-      case 0x90: this.noteOn(ch,msg[1],msg[2],t); break;
-      case 0x80: this.noteOff(ch,msg[1],t); break;
+      case 0xe0: this.setBend(ch,(msg[1]+(msg[2]<<7)),t,audioTime); break;
+      case 0x90: this.noteOn(ch,msg[1],msg[2],t,audioTime); break;
+      case 0x80: this.noteOff(ch,msg[1],t,audioTime); break;
       case 0xf0:
         if (msg[0] == 0xff) {
           this.reset();
