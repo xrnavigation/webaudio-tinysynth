@@ -36,3 +36,12 @@ test('editor keeps overlapping input notes and channels distinct', () => {
   e.send([0x90,60,0]); e.send([0x81,60,0]); e.send([0x80,60,0]);
   assert.deepEqual(e.sent.slice(-3), [[0x90,72,0],[0x81,60,0],[0x80,60,0]]);
 });
+
+test('editor clears mappings when channel mode or system reset ends notes', () => {
+  for (const reset of [[0xb0,120,0],[0xb0,123,0],[0xb0,124,0],[0xb0,125,0],[0xb0,126,0],[0xb0,127,0],[0xff]]) {
+    const e = editor(); e.sandbox.curOct = 1;
+    e.send([0x90,60,100]); e.send(reset); e.sandbox.curOct = 0;
+    e.send([0x90,60,100]); e.send([0x80,60,0]);
+    assert.deepEqual(e.sent.at(-1), [0x80,60,0]);
+  }
+});
