@@ -735,7 +735,7 @@ function WebAudioTinySynthCore(target) {
             for(let i=this.notetab.length-1;i>=0;--i){
               var nt=this.notetab[i];
               if(this.actx.currentTime>nt.e){
-                this._pruneNote(nt);
+                this._disposePartials(nt);
                 this.notetab.splice(i,1);
               }
             }
@@ -956,25 +956,15 @@ function WebAudioTinySynthCore(target) {
       if(m==0 && n>=0 && n<=127)
         this.program[n].p=filldef(p);
     },
-    _pruneNote:(nt)=>{
-      for(let k=nt.o.length-1;k>=0;--k){
-        if(nt.o[k].frequency){
-          nt.o[k].frequency.cancelScheduledValues(0);
-        }
-        else{
-          nt.o[k].playbackRate.cancelScheduledValues(0);
-        }
-        nt.g[k].gain.cancelScheduledValues(0);
-
-        nt.o[k].stop();
-        if(nt.o[k].detune) {
+    _disposePartials:(parts)=>{
+      for(let k=parts.o.length-1;k>=0;--k){
+        if(parts.o[k].detune && parts.modulation) {
           try {
-            this.chmod[nt.ch].disconnect(nt.o[k].detune);
+            parts.modulation.disconnect(parts.o[k].detune);
           } catch (e) {}
         }
-        nt.g[k].gain.value = 0;
-        this._disconnectNode(nt.o[k]);
-        this._disconnectNode(nt.g[k]);
+        this._disconnectNode(parts.o[k]);
+        this._disconnectNode(parts.g[k]);
       }
     },
     _limitVoices:(ch,n)=>{
@@ -986,7 +976,7 @@ function WebAudioTinySynthCore(target) {
       for(let i=this.notetab.length-1;i>=0;--i){
         var nt=this.notetab[i];
         if(this.actx.currentTime>nt.e || i>=(this.voices-1)){
-          this._pruneNote(nt);
+          this._disposePartials(nt);
           this.notetab.splice(i,1);
         }
       }
@@ -994,11 +984,24 @@ function WebAudioTinySynthCore(target) {
     _note:(t,ch,n,v,p)=>{
       const f=440*Math.pow(2,(n-69 + this.masterTuningC + this.tuningC[ch] + (this.masterTuningF + this.tuningF[ch]/8192 + this.scaleTuning[ch][n%12]))/12);
       this._limitVoices(ch,n);
-      const parts=this._buildPartials(t,n,v,p,f,this.chvol[ch],this.chmod[ch],this.bend[ch],this.rhythm[ch]);
-      if(!this.rhythm[ch])
-        this.notetab.push({t:t,e:99999,ch:ch,n:n,o:parts.o,g:parts.g,v:parts.v,r:parts.r,envelopes:parts.envelopes,f:0});
+      const rhythm=!!this.rhythm[ch];
+      const parts=this._buildPartials(t,n,v,p,f,this.chvol[ch],this.chmod[ch],this.bend[ch]);
+      const nt={...parts,t:t,e:rhythm ? t+p[0].d*this.releaseRatio : 99999,ch:ch,n:n,rhythm:rhythm,f:rhythm ? 1 : 0};
+      this.notetab.push(nt);
+      if(rhythm){
+        let remaining=parts.o.length;
+        for(const source of parts.o){
+          source.onended=()=>{
+            if(--remaining!==0) return;
+            this._disposePartials(parts);
+            const index=this.notetab.indexOf(nt);
+            if(index!==-1) this.notetab.splice(index,1);
+          };
+          source.stop(nt.e);
+        }
+      }
     },
-    _buildPartials:(t,n,v,p,f,destination,modulation,bend,rhythm)=>{
+    _buildPartials:(t,n,v,p,f,destination,modulation,bend)=>{
       let out,sc,pn;
       const o=[],g=[],vp=[],fp=[],r=[];
       const before=new Set(this._nodes);
@@ -1057,20 +1060,8 @@ function WebAudioTinySynthCore(target) {
           g[i].gain.setValueAtTime(vp[i],t);
         this._setParamTarget(g[i].gain,pn.s*vp[i],dt,pn.d);
         o[i].start(t);
-        if(rhythm){
-
-          o[i].onended = ()=>{
-            try {
-              if (o[i].detune && modulation) modulation.disconnect(o[i].detune);
-            }
-            catch(e){}
-            this._disconnectNode(o[i]);
-            this._disconnectNode(g[i]);
-          };
-          o[i].stop(t+p[0].d*this.releaseRatio);
-        }
       }
-      return {o:o,g:g,v:vp,r:r,envelopes:p.map(part=>({...part}))};
+      return {o:o,g:g,v:vp,r:r,envelopes:p.map(part=>({...part})),modulation:modulation};
       } catch(error) {
         for(const node of [...this._nodes]) if(!before.has(node)) this._disconnectNode(node);
         throw error;
@@ -1093,7 +1084,7 @@ function WebAudioTinySynthCore(target) {
       const finish=()=>{
         if(finished) return;
         finished=true;
-        if(parts) for(const node of [...parts.o,...parts.g]) owner._disconnectNode(node);
+        if(parts) owner._disposePartials(parts);
         if(root) owner._disconnectNode(root);
         owner._voices.delete(voice);
         parts=root=owner=context=null;
@@ -1128,7 +1119,7 @@ function WebAudioTinySynthCore(target) {
         root=this._createNode("Gain");
         root.gain.value=gain;
         root.connect(destination);
-        parts=this._buildPartials(start,note,velocity,this.program[program].p,440*Math.pow(2,(note-69)/12),root,null,0,false);
+        parts=this._buildPartials(start,note,velocity,this.program[program].p,440*Math.pow(2,(note-69)/12),root,null,0);
         let remaining=parts.o.length;
         for(const oscillator of parts.o) oscillator.onended=()=>{ if(--remaining===0) finish(); };
         this._voices.add(voice);
@@ -1195,7 +1186,7 @@ function WebAudioTinySynthCore(target) {
       for(let i=this.notetab.length-1;i>=0;--i){
         const nt=this.notetab[i];
         if(nt.ch==ch){
-          this._pruneNote(nt);
+          this._disposePartials(nt);
           this.notetab.splice(i,1);
         }
       }
