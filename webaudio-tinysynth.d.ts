@@ -13,6 +13,8 @@ declare class WebAudioTinySynth {
   noteOff(channel: number, note: number, time?: number): void;
   allSoundOff(channel: number): void;
   setProgram(channel: number, program: number): void;
+  /** mode 0 selects a melodic program (0–127); mode 1 selects a drum note (35–81). */
+  setTimbre(mode: 0 | 1, program: number, partials: WebAudioTinySynth.TimbrePartial[]): void;
   setMasterVol(volume: number): void;
   setReverbLev(level: number): void;
   setQuality(quality: number): void;
@@ -38,6 +40,28 @@ declare class WebAudioTinySynth {
 }
 
 declare namespace WebAudioTinySynth {
+  interface TimbrePartial {
+    /** 0: output; 1–10: frequency modulation of partial g-1; 11+: gain modulation of partial g-11. Targets must precede this partial. */
+    g?: number;
+    w?: 'sine' | 'square' | 'sawtooth' | 'triangle' | 'n0' | 'n1' | 'w9999';
+    /** Frequency multiplier and fixed frequency offset in Hz. */
+    t?: number;
+    f?: number;
+    v?: number;
+    /** Attack and hold durations in seconds. */
+    a?: number;
+    h?: number;
+    /** Decay time constant in seconds and sustain level relative to peak. */
+    d?: number;
+    s?: number;
+    /** Release time constant in seconds. */
+    r?: number;
+    /** Pitch target multiplier and transition time constant in seconds. */
+    p?: number;
+    q?: number;
+    /** Volume key tracking exponent. */
+    k?: number;
+  }
   interface Options {
     audioContext?: BaseAudioContext;
     destination?: AudioNode;
