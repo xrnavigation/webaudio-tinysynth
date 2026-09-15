@@ -11,7 +11,11 @@ function sequence(track) {
   synth.loadMIDI(Uint8Array.from([77,84,104,100,0,0,0,6,0,0,0,1,1,224,
     77,84,114,107,0,0,0,track.length,...track]).buffer);
   const sent = [];
-  synth._sendAtAudioTime = (message, time) => sent.push({ message: [...message], time });
+  const dispatch = synth._sendAtAudioTime;
+  synth._sendAtAudioTime = (message, time) => {
+    if(time > now) sent.push({ message: [...message], time });
+    dispatch(message, time);
+  };
   return { synth, sent, advance(time) { now = time; harness.tick(); } };
 }
 function near(actual, expected) { assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} != ${expected}`); }

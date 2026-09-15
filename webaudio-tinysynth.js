@@ -821,29 +821,21 @@ function WebAudioTinySynthCore(target) {
     locateMIDI:(tick)=>{
       let i,p=this.playing;
       this.stopMIDI();
+      for(const pan of this.chpan)
+        if(pan) pan.pan.cancelScheduledValues(this.actx.currentTime);
+      this.reset();
       tick=Math.max(0,Math.min(tick,this.maxTick));
       this.song.tempo=120;
       for(i=0;i<this.song.ev.length && tick>this.song.ev[i].t;++i){
-        var m=this.song.ev[i];
-        var ch=m.m[0]&0xf;
-        switch(m.m[0]&0xf0){
-        case 0xb0:
-          switch(m.m[1]){
-          case 1:  this.setModulation(ch,m.m[2]); break;
-          case 7:  this.setChVol(ch,m.m[2]); break;
-          case 10: this.setPan(ch,m.m[2]); break;
-          case 11: this.setExpression(ch,m.m[2]); break;
-          case 64: this.setSustain(ch,m.m[2]); break;
-          }
-          break;
-        case 0xc0: this.pg[m.m[0]&0x0f]=m.m[1]; break;
-        }
-        if(m.m[0]==0xff51)
-          this.song.tempo=m.m[1];
+        const message=this.song.ev[i].m;
+        if(message[0]==0xff51)
+          this.song.tempo=message[1];
+        else if(message[0]>=0xa0 && message[0]<=0xff)
+          this._sendAtAudioTime(message,this.actx.currentTime);
       }
       this.playIndex=i;
       this.playTick=tick;
-      if(p)
+      if(p && tick<this.maxTick)
         this.playMIDI();
     },
     getTimbreName:(m,n)=>{
@@ -958,7 +950,6 @@ function WebAudioTinySynthCore(target) {
       this.stopMIDI();
       this.song=song;
       this.maxTick=song.maxTick;
-      this.reset();
       this.locateMIDI(0);
     },
     setQuality:(q)=>{
