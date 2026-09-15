@@ -753,8 +753,13 @@ function WebAudioTinySynthCore(target) {
                 this.send(e.m,this.playTime);
               ++this.playIndex;
               if(this.playIndex>=this.song.ev.length){
-                if(this.loop){
+                if(this.loop && this.maxTick>0){
+                  // Include the final rest before returning to tick zero.
+                  this.playTime+=(this.maxTick-this.playTick)*this.tick2Time;
+                  this.song.tempo=this._loopTempo;
+                  this.tick2Time=4*60/this.song.tempo/this.song.timebase;
                   e=this.song.ev[this.playIndex=0];
+                  this.playTime+=e.t*this.tick2Time;
                   this.playTick=e.t;
                 }
                 else{
@@ -888,8 +893,10 @@ function WebAudioTinySynthCore(target) {
         this.allSoundOff(i);
     },
     playMIDI:()=>{
-      if(!this.song)
+      if(!this.song || !this.song.ev.length){
+        this.playing=0;
         return;
+      }
       const dummy=this._createNode("Oscillator");
       dummy.connect(this.dest);
       dummy.onended=()=>this._disconnectNode(dummy);
@@ -899,6 +906,7 @@ function WebAudioTinySynthCore(target) {
       if(this.playTick>=this.maxTick)
         this.playTick=0,this.playIndex=0;
       this.playTime=this.actx.currentTime+.1;
+      this._loopTempo=this.song.tempo;
       this.tick2Time=4*60/this.song.tempo/this.song.timebase;
       this.playing=1;
     },
