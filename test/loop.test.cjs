@@ -16,7 +16,7 @@ function probe(events, endDelta, checks) {
     synth.loop = 1;
     synth.preroll = 1.2;
     const sent = [];
-    synth.send = (message, time) => sent.push({message, time});
+    synth._sendAtAudioTime = (message, time) => sent.push({message, time});
     synth.playMIDI();
     tick();
     ${checks}
