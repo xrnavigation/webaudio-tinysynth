@@ -3,17 +3,18 @@ const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const path = require('node:path');
 const { loadSynth } = require('./harness.cjs');
-// Captured from lifecycle-only commit 414d3a38 before factoring the partial builder.
+// Updated for per-partial release levels. Native Chromium independently checks
+// these envelope equations in scripts/check-envelopes.cjs; hashes guard drift.
 const expected = {
-  73: '1358cf1f001157d17d7bfe68de4cb9d221a1dcd69275f06694846ee0a5d9f209',
-  0: '8ea2cb921c3c34459a0fcf456cbffdd3c74f476dd7acbcf2fe1f632afdd84744',
-  24: 'a653f47962beba363c181b8a4b83588cc9e847197f0b038e015930567441c02c',
-  12: '16955cfc64d32c5a417a16ba13fbf25951033d7af110a3b4d420a088ddd79bfc',
-  8: '4f2176c85d5f287004f4627483f97813923a25a0503f8b07a8ea41fb2e07c351',
-  68: '8e72c8298755022432e71b10f5e456037014b620f3fc25d2dbc400b8616ab698',
-  46: '96b6ee47b009c9449dcdf6791b314b8dba845b7e3517ca87b1313d31af84630d',
-  11: '5331176ce2ea8ee61d1340845d009bb61e864ecfca0b14e35071af18d05eaeb4',
-  122: 'ba663b06ac9d68ca7de4ff7911b3cb29814a0de0e8a9580f0c40c9b808169c00',
+  73: '419de5787a7b507ae1278206a11bd93bafb3ef7bc36490a652436b8efd3ebb0a',
+  0: '591773cd6e1c8d54acdafd5694007c60eef626f970111c4079061450493b50d5',
+  24: '5913f9088151bc56be5dbdcdd7828b86e57fb44a0fcf0269b69ec9a0d6d6b097',
+  12: '22d7807de287494e7b6dc27384a10a11c24dd5c26316407e9b139f843663d6a7',
+  8: 'fa86e0e9215e2675c1def027dea3a01898d63fa8a6dc2784f026c32c58bccc0d',
+  68: '7673f083051161c6df9f974bd535cd72a711fc234af01b04a255664ccc793e1a',
+  46: '1d545db3173c325290b28f41a93f3eb783dffcaef467ec70cfc5974623451f0b',
+  11: '0263e4216cb149230be0e223ecf57149f03f104125b0c759957986d00c9ef1e8',
+  122: '73f62034969052b4f4f46b9b1071ba660d8a6ddd6cc0c092469d0da7a017060a',
 };
 for (const [program, hash] of Object.entries(expected)) {
   test(`MIDI program ${program} renders unchanged`, async () => {
