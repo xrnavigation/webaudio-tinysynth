@@ -1186,7 +1186,7 @@ function WebAudioTinySynthCore(target) {
       if(v<64){
         for(let i=this.notetab.length-1;i>=0;--i){
           const nt=this.notetab[i];
-          if(t>=nt.t && nt.ch==ch && nt.f==1)
+          if(t>=nt.t && nt.ch==ch && nt.f==1 && nt.releaseAt===undefined)
             this._releaseNote(nt,t);
         }
       }
@@ -1227,7 +1227,7 @@ function WebAudioTinySynthCore(target) {
             source.detune.setValueAtTime(0,time);
           }
         }
-        if(nt.f && time>=nt.t) this._releaseNote(nt,time);
+        if(nt.f && time>=nt.t && nt.releaseAt===undefined) this._releaseNote(nt,time);
       }
     },
     setBendRange:(ch,v)=>{

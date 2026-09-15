@@ -54,3 +54,14 @@ test('melodic channel ten releases and noise partials receive live bend', async 
   assert.ok(note.g[0].gain._impl._timeline.some(event => event.type === 'setTargetAtTime' && event.time === 0.2 && event.args[0] === 0));
   await synth.dispose();
 });
+
+test('pedal-up and reset do not advance an already scheduled note release', async () => {
+  const { synth } = setup();
+  synth.noteOn(0,60,100); synth.noteOff(0,60,2);
+  const note=synth.notetab[0], end=note.e;
+  synth.setSustain(0,0,1);
+  assert.equal(note.e,end);
+  synth.resetAllControllers(0);
+  assert.equal(note.e,end);
+  await synth.dispose();
+});
