@@ -1585,7 +1585,7 @@ if(window && window.customElements){
         const v = plist[k];
         this[k] = this.getAttr(k,v.value);
       }
-      this.setQuality(1);
+      this.setQuality();
       try { this.init(); }
       catch(error){ this.dispose().catch(()=>{}); throw error; }
       this._guiInit.bind(this)();

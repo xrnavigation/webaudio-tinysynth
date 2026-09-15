@@ -10,6 +10,7 @@ const { chromium } = require('playwright');
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       await page.addScriptTag({ path: path.join(__dirname, '..', filename) });
+      await require('./check-quality.cjs')(page);
       await require('./check-controllers.cjs')(page);
       await require('./check-envelopes.cjs')(page);
       await require('./check-percussion.cjs')(page);
