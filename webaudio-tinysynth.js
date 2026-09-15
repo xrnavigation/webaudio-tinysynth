@@ -882,6 +882,7 @@ function WebAudioTinySynthCore(target) {
         this.rhythm[i]=0;
         this.tuningC[i]=0;
         this.tuningF[i]=0;
+        this.scaleTuning[i].fill(0);
       }
       this.masterTuningC=0;
       this.masterTuningF=0;
@@ -1156,10 +1157,10 @@ function WebAudioTinySynthCore(target) {
       this._setParamTarget(parameter,0,time,p.r);
     },
     _releaseNote:(nt,t)=>{
-      if(nt.ch!=9){
-        for(let k=nt.g.length-1;k>=0;--k){
-          this._releasePartial(nt.g[k].gain,nt.envelopes[k],nt.v[k],nt.t,t);
-        }
+      if(nt.rhythm || t>=nt.releaseAt) return;
+      nt.releaseAt=t;
+      for(let k=nt.g.length-1;k>=0;--k){
+        this._releasePartial(nt.g[k].gain,nt.envelopes[k],nt.v[k],nt.t,t);
       }
       nt.e=t+Math.max(...nt.r)*this.releaseRatio;
       nt.f=1;
@@ -1199,12 +1200,34 @@ function WebAudioTinySynthCore(target) {
         }
       }
     },
+    _allNotesOff:(ch,t)=>{
+      t=this._tsConv(t);
+      for(const nt of this.notetab){
+        if(nt.ch===ch && !nt.rhythm && !nt.f && t>=nt.t){
+          nt.f=1;
+          if(this.sustain[ch]<64) this._releaseNote(nt,t);
+        }
+      }
+    },
     resetAllControllers:(ch)=>{
+      const time=this.actx ? this.actx.currentTime : 0;
       this.bend[ch]=0; this.ex[ch]=1.0;
       this.rpnidx[ch]=0x3fff; this.sustain[ch]=0;
       if(this.chvol[ch]){
-        this.chvol[ch].gain.value=this.vol[ch]*this.ex[ch];
-        this.chmod[ch].gain.value=0;
+        this.chvol[ch].gain.cancelScheduledValues(time);
+        this.chvol[ch].gain.setValueAtTime(this.vol[ch],time);
+        this.chmod[ch].gain.cancelScheduledValues(time);
+        this.chmod[ch].gain.setValueAtTime(0,time);
+      }
+      for(const nt of this.notetab){
+        if(nt.ch!==ch) continue;
+        for(const source of nt.o){
+          if(source.detune){
+            source.detune.cancelScheduledValues(time);
+            source.detune.setValueAtTime(0,time);
+          }
+        }
+        if(nt.f && time>=nt.t) this._releaseNote(nt,time);
       }
     },
     setBendRange:(ch,v)=>{
@@ -1235,19 +1258,16 @@ function WebAudioTinySynthCore(target) {
         const nt=this.notetab[i];
         if(nt.ch==ch){
           for(let k=nt.o.length-1;k>=0;--k){
-            if(nt.o[k].frequency)
-              if (nt.o[k].detune) nt.o[k].detune.setValueAtTime(this.bend[ch],t);
+            if(nt.o[k].detune) nt.o[k].detune.setValueAtTime(this.bend[ch],t);
           }
         }
       }
     },
     noteOff:(ch,n,t)=>{
-      if(this.rhythm[ch])
-        return;
       t=this._tsConv(t);
       for(let i=this.notetab.length-1;i>=0;--i){
         const nt=this.notetab[i];
-        if(t>=nt.t && nt.ch==ch && nt.n==n && nt.f==0){
+        if(t>=nt.t && nt.ch==ch && nt.n==n && nt.f==0 && !nt.rhythm){
           nt.f=1;
           if(this.sustain[ch]<64)
             this._releaseNote(nt,t);
@@ -1314,9 +1334,11 @@ function WebAudioTinySynthCore(target) {
           }
           break;
         case 120:  /* all sound off */
+          this.allSoundOff(ch);
+          break;
         case 123:  /* all notes off */
         case 124: case 125: case 126: case 127: /* omni off/on mono/poly */
-          this.allSoundOff(ch);
+          this._allNotesOff(ch,t);
           break;
         case 121: this.resetAllControllers(ch); break;
         }
