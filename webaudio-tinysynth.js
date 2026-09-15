@@ -903,112 +903,107 @@ function WebAudioTinySynthCore(target) {
       this.playing=1;
     },
     loadMIDI:(data)=>{
-      function Get2(s, i) { return (s[i]<<8) + s[i+1]; }
-      function Get3(s, i) { return (s[i]<<16) + (s[i+1]<<8) + s[i+2]; }
-      function Get4(s, i) { return (s[i]<<24) + (s[i+1]<<16) + (s[i+2]<<8) + s[i+3]; }
-      function GetStr(s, i, len) {
-        return String.fromCharCode.apply(null,s.slice(i,i+len));
+      var bytes=new Uint8Array(data), cursor=0, end=bytes.length;
+      function invalid(reason) { throw new Error("Invalid MIDI: "+reason); }
+      function need(length) {
+        if(length>end-cursor) invalid("truncated data");
       }
-      function Delta(s, i) {
-        var v, d;
-        v = 0;
-        datalen = 1;
-        while((d = s[i]) & 0x80) {
-          v = (v<<7) + (d&0x7f);
-          ++datalen;
-          ++i;
+      function read(length) {
+        need(length);
+        var value=0;
+        while(length--) value=value*256+bytes[cursor++];
+        return value;
+      }
+      function variable() {
+        var value=0;
+        for(var count=0;count<4;++count) {
+          var byte=read(1);
+          value=value*128+(byte&127);
+          if(!(byte&128)) return value;
         }
-        return (v<<7)+d;
+        invalid("variable-length value exceeds four bytes");
       }
-      function Msg(song,tick,s,i){
-        var v=s[i];
-        datalen=1;
-        if((v&0x80)==0)
-          v=runst,datalen=0;
-        runst=v;
-        switch(v&0xf0){
-        case 0xc0: case 0xd0:
-          song.ev.push({t:tick,m:[v,s[i+datalen]]});
-          datalen+=1;
-          break;
-        case 0xf0:
-          switch(v) {
-          case 0xf0:
-          case 0xf7:
-            var len=Delta(s,i+1);
-            datastart=1+datalen;
-            var exd=Array.from(s.slice(i+datastart,i+datastart+len));
-            exd.unshift(0xf0);
-            song.ev.push({t:tick,m:exd});
-/*
-            var sysex=[];
-            for(var jj=0;jj<len;++jj)
-              sysex.push(s[i+datastart+jj].toString(16));
-            if(this.debug)
-              console.log(sysex);
-*/
-            datalen+=len+1;
-            break;
-          case 0xff:
-            var len = Delta(s, i + 2);
-            datastart = 2+datalen;
-            datalen = len+datalen+2;
-            switch(s[i+1]) {
-            case 0x02: song.copyright+=GetStr(s, i + datastart, datalen - 3); break;
-            case 0x01: case 0x03: case 0x04: case 0x09:
-              song.text=GetStr(s, i + datastart, datalen - datastart);
-              break;
-            case 0x2f:
-              return 1;
-            case 0x51:
-              var val = Math.floor(60000000 / Get3(s, i + 3));
-              song.ev.push({t:tick, m:[0xff51, val]});
-              break;
+      function text(length) {
+        need(length);
+        var value="";
+        while(length--) value+=String.fromCharCode(bytes[cursor++]);
+        return value;
+      }
+      if(read(4)!==0x4d546864) invalid("missing MThd");
+      var headerLength=read(4);
+      if(headerLength<6) invalid("short header");
+      need(headerLength);
+      read(2); // Format interpretation is unchanged.
+      var tracks=read(2), timebase=read(2)*4;
+      cursor+=headerLength-6;
+      var song={copyright:"",text:"",tempo:120,timebase:timebase,ev:[]};
+      var maxTick=0;
+      for(var track=0;track<tracks;++track) {
+        end=bytes.length;
+        if(read(4)!==0x4d54726b) invalid("missing MTrk");
+        var length=read(4);
+        need(length);
+        end=cursor+length;
+        var tick=0, running=0, ended=false;
+        while(cursor<end) {
+          tick+=variable();
+          var status=read(1);
+          if(status<128) {
+            if(!running) invalid("running status without channel status");
+            --cursor;
+            status=running;
+          }
+          if(status<0xf0) {
+            running=status;
+            var message=[status];
+            var count=(status&0xf0)===0xc0 || (status&0xf0)===0xd0 ? 1 : 2;
+            while(count--) {
+              var value=read(1);
+              if(value>=128) invalid("invalid channel data byte");
+              message.push(value);
             }
-            break;
+            song.ev.push({t:tick,m:message});
           }
-          break;
-        default:
-          song.ev.push({t:tick,m:[v,s[i+datalen],s[i+datalen+1]]});
-          datalen+=2;
+          else {
+            running=0;
+            if(status===0xff) {
+              var type=read(1), size=variable();
+              need(size);
+              if(type===0x2f) {
+                if(size!==0) invalid("invalid End-of-Track length");
+                ended=true;
+                break;
+              }
+              if(type===0x51) {
+                if(size!==3) invalid("invalid tempo length");
+                var tempo=read(3);
+                if(!tempo) invalid("zero tempo");
+                song.ev.push({t:tick,m:[0xff51,Math.floor(60000000/tempo)]});
+              }
+              else if(type===2) song.copyright+=text(size);
+              else if(type===1 || type===3 || type===4 || type===9) song.text=text(size);
+              else cursor+=size;
+            }
+            else if(status===0xf0 || status===0xf7) {
+              var size=variable();
+              need(size);
+              var message=Array.from(bytes.slice(cursor,cursor+size));
+              message.unshift(0xf0);
+              song.ev.push({t:tick,m:message});
+              cursor+=size;
+            }
+            else invalid("unsupported event status");
+          }
         }
-        return 0;
+        if(!ended) invalid("missing End-of-Track");
+        if(tick>maxTick) maxTick=tick;
+        cursor=end;
       }
+      song.ev.sort(function(x,y){return x.t-y.t});
+      // Commit only after every track has been validated.
       this.stopMIDI();
-      var s=new Uint8Array(data);
-      var datalen = 0, datastart = 0, runst = 0x90;
-      var idx = 0;
-      var hd = s.slice(0,  4);
-      if(hd.toString()!="77,84,104,100")  //MThd
-        return;
-      var len = Get4(s, 4);
-      var fmt = Get2(s, 8);
-      var numtrk = Get2(s, 10);
-      this.maxTick=0;
-      var tb = Get2(s, 12)*4;
-      idx = (len + 8);
-      this.song={copyright:"",text:"",tempo:120,timebase:tb,ev:[]};
-      for(let tr=0;tr<numtrk;++tr){
-        hd=s.slice(idx, idx+4);
-        len=Get4(s, idx+4);
-        if(hd.toString()=="77,84,114,107") {//MTrk
-          var tick = 0;
-          var j = 0;
-          this.notetab.length = 0;
-          for(;;) {
-            tick += Delta(s, idx + 8 + j);
-            j += datalen;
-            var e = Msg(this.song, tick, s, idx + 8 + j);
-            j += datalen;
-            if(e)
-              break;
-          }
-          if(tick>this.maxTick)
-            this.maxTick=tick;
-        }
-        idx += (len+8);
-      }
-      this.song.ev.sort(function(x,y){return x.t-y.t});
+      this.song=song;
+      this.maxTick=maxTick;
       this.reset();
       this.locateMIDI(0);
     },
