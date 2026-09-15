@@ -401,7 +401,7 @@ disconnects owned nodes, aborts pending MIDI reads, removes GUI listeners and cl
 timers. It returns the same `Promise<void>` on repeated calls. The promise waits for
 internally owned context closures and rejects if closure fails; synchronous graph
 cleanup still happens. Subsequent public operations throw `TinySynth is disposed`;
-`ready()` instead returns a rejected promise. Pending reads cannot revive the synth.
+`ready()` and `loadMIDIUrl()` instead return rejected promises (including an empty URL). Pending reads cannot revive the synth.
 Initialization is synchronous, so `ready()` no longer allocates a polling timer.
 
 The custom element disposes when disconnected. Disposal is permanent: create a new

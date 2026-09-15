@@ -862,8 +862,8 @@ function WebAudioTinySynthCore(target) {
       if(this._midiLoad) this._midiLoad();
     },
     loadMIDIUrl:(url)=>{
-      if(!url) return Promise.resolve();
       if(this._disposed) return Promise.reject(new Error("TinySynth is disposed"));
+      if(!url) return Promise.resolve();
       this._cancelMIDILoad();
       return new Promise((resolve,reject)=>{
         const xhr=new XMLHttpRequest();

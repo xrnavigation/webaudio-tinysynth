@@ -43,6 +43,8 @@ for (const file of ['webaudio-tinysynth.js', 'webaudio-tinysynth.min.js']) {
     const { synth, requests } = fixture(file);
     synth.loadMIDI(midi);
     const original = synth.song;
+    await synth.loadMIDIUrl('');
+    assert.equal(requests.length, 0);
     for (const [finish, pattern] of [
       [xhr => xhr.finish(404), /HTTP 404/],
       [xhr => xhr.onerror(), /network/i],
@@ -63,7 +65,7 @@ for (const file of ['webaudio-tinysynth.js', 'webaudio-tinysynth.min.js']) {
     await rejected;
     assert.equal(requests.at(-1).aborted, true);
     await assert.rejects(synth.loadMIDIUrl('disposed.mid'), /disposed/);
-    await synth.loadMIDIUrl('');
+    await assert.rejects(synth.loadMIDIUrl(''), /disposed/);
   });
   test(`${file}: direct MIDI load supersedes pending URL load`, async () => {
     const { synth, requests } = fixture(file);
