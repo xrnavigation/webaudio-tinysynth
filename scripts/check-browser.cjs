@@ -10,6 +10,7 @@ const { chromium } = require('playwright');
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       await page.addScriptTag({ path: path.join(__dirname, '..', filename) });
+      await require('./check-envelopes.cjs')(page);
       const result = await page.evaluate(async () => {
         const context = new OfflineAudioContext(2, 48000, 48000);
         const synth = new WebAudioTinySynth({ audioContext: context, useReverb: 0 });

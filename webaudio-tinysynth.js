@@ -1087,7 +1087,7 @@ function WebAudioTinySynthCore(target) {
       this._limitVoices(ch,n);
       const parts=this._buildPartials(t,n,v,p,f,this.chvol[ch],this.chmod[ch],this.bend[ch],this.rhythm[ch]);
       if(!this.rhythm[ch])
-        this.notetab.push({t:t,e:99999,ch:ch,n:n,o:parts.o,g:parts.g,t2:t+parts.last.a,v:parts.v,r:parts.r,f:0});
+        this.notetab.push({t:t,e:99999,ch:ch,n:n,o:parts.o,g:parts.g,v:parts.v,r:parts.r,envelopes:parts.envelopes,f:0});
     },
     _buildPartials:(t,n,v,p,f,destination,modulation,bend,rhythm)=>{
       let out,sc,pn;
@@ -1161,7 +1161,7 @@ function WebAudioTinySynthCore(target) {
           o[i].stop(t+p[0].d*this.releaseRatio);
         }
       }
-      return {o:o,g:g,v:vp,r:r,last:pn,envelopes:p};
+      return {o:o,g:g,v:vp,r:r,envelopes:p.map(part=>({...part}))};
       } catch(error) {
         for(const node of [...this._nodes]) if(!before.has(node)) this._disconnectNode(node);
         throw error;
@@ -1209,15 +1209,8 @@ function WebAudioTinySynthCore(target) {
           if(time>=releaseAt) return;
           releaseAt=time;
           for(let i=0;i<parts.o.length;i++){
-            const p=parts.envelopes[i], peak=parts.v[i];
-            const elapsed=time-start;
-            let value=peak;
-            if(elapsed<p.a) value=peak*elapsed/p.a;
-            else if(elapsed>=p.a+p.h) value=p.d===0 ? p.s*peak : p.s*peak+(peak-p.s*peak)*Math.exp(-(elapsed-p.a-p.h)/p.d);
-            const parameter=parts.g[i].gain;
-            parameter.cancelScheduledValues(time);
-            parameter.setValueAtTime(value,time);
-            owner._setParamTarget(parameter,0,time,p.r);
+            const p=parts.envelopes[i];
+            owner._releasePartial(parts.g[i].gain,p,parts.v[i],start,time);
             parts.o[i].stop(time+p.r*owner.releaseRatio);
           }
         },
@@ -1240,18 +1233,27 @@ function WebAudioTinySynthCore(target) {
       else
         p.setValueAtTime(v,t);
     },
+    _releasePartial:(parameter,p,peak,start,time)=>{
+      const elapsed=time-start;
+      let value=peak;
+      if(elapsed<p.a) value=peak*elapsed/p.a;
+      else if(elapsed>=p.a+p.h) value=p.d===0 ? p.s*peak : p.s*peak+(peak-p.s*peak)*Math.exp(-(elapsed-p.a-p.h)/p.d);
+      parameter.cancelScheduledValues(time);
+      // Removing the attack endpoint also removes the ramp before release.
+      // Replace it with a shorter ramp, including when rescheduling earlier.
+      if(p.a && elapsed<=p.a)
+        parameter.linearRampToValueAtTime(value,time);
+      else
+        parameter.setValueAtTime(value,time);
+      this._setParamTarget(parameter,0,time,p.r);
+    },
     _releaseNote:(nt,t)=>{
       if(nt.ch!=9){
         for(let k=nt.g.length-1;k>=0;--k){
-          nt.g[k].gain.cancelScheduledValues(t);
-          if(t==nt.t2)
-            nt.g[k].gain.setValueAtTime(nt.v[k],t);
-          else if(t<nt.t2)
-            nt.g[k].gain.setValueAtTime(nt.v[k]*(t-nt.t)/(nt.t2-nt.t),t);
-          this._setParamTarget(nt.g[k].gain,0,t,nt.r[k]);
+          this._releasePartial(nt.g[k].gain,nt.envelopes[k],nt.v[k],nt.t,t);
         }
       }
-      nt.e=t+nt.r[0]*this.releaseRatio;
+      nt.e=t+Math.max(...nt.r)*this.releaseRatio;
       nt.f=1;
     },
     setModulation:(ch,v,t)=>{
