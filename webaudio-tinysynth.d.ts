@@ -33,7 +33,7 @@ declare class WebAudioTinySynth {
   resetAllControllers(channel: number): void;
   reset(): void;
   loadMIDI(data: ArrayBuffer): void;
-  loadMIDIUrl(url: string): void;
+  loadMIDIUrl(url: string): Promise<void>;
   playMIDI(): void;
   stopMIDI(): void;
   locateMIDI(tick: number): void;

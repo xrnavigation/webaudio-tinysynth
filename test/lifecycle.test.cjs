@@ -104,9 +104,10 @@ test('late MIDI download cannot resurrect a disposed synth', async () => {
   class XHR { constructor() { xhr = this; } open() {} send() {} abort() { this.aborted = true; } }
   const { Synth } = loadSynth(source, true, { XMLHttpRequest: XHR });
   const synth = new Synth({ audioContext: context().ctx, useReverb: 0 });
-  synth.loadMIDIUrl('example.mid');
+  const rejected = assert.rejects(synth.loadMIDIUrl('example.mid'), { name: 'AbortError' });
   const late = xhr.onload;
   await synth.dispose();
+  await rejected;
   assert.equal(xhr.aborted, true);
   xhr.status = 200;
   late.call(xhr);
