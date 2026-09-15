@@ -1,4 +1,8 @@
 import TinySynth = require('@xrnavigation/webaudio-tinysynth');
+const song: TinySynth.MIDISong = TinySynth.parseMIDI(Uint8Array.from([
+  77,84,104,100,0,0,0,6,0,0,0,1,1,224,77,84,114,107,0,0,0,4,0,255,47,0,
+]).buffer);
+const lastTick: number = song.maxTick;
 const context = new OfflineAudioContext(2, 48000, 48000);
 const synth = new TinySynth({ audioContext: context, destination: context.destination });
 const partial: TinySynth.TimbrePartial = { w: 'sine', v: 0.4, d: 0.7, r: 0.1 };

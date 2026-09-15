@@ -155,6 +155,10 @@ async function() {
 
 **loadMIDI(mididata)**
 > load MIDI data to built-in sequencer. mididata is a arraybuffer of SMF (.mid file contents).
+> Supports SMF format 0 (one track) and format 1 with ticks-per-quarter-note timing. Invalid files, format 2, and SMPTE timing throw an error before changing the current song or playback.
+
+**WebAudioTinySynth.parseMIDI(mididata)**
+> Parse an SMF ArrayBuffer without creating a synthesizer or AudioContext. Returns `{copyright, text, tempo, timebase, maxTick, ev}`. `tempo` starts at 120 BPM; `timebase` is ticks per whole note; `maxTick` includes trailing silence through End-of-Track. Events have `{t, m}` (tick and MIDI message), sorted by tick with source track/event order preserved for ties. Tempo events use `[0xff51, BPM]` with fractional precision. Throws for the same invalid or unsupported data as `loadMIDI()`.
 
 **loadMIDIUrl(url)**
 > load MIDI data from specified url
