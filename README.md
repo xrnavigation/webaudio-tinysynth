@@ -170,7 +170,7 @@ async function() {
 > stop playing MIDI data.
 
 **locateMIDI(tick)**
-> locate current playing position in tick.
+> Seek to a tick, clamped to the song boundaries. Restore initial MIDI channel state and replay state changes strictly before that tick; events exactly at the tick remain pending. Prior notes are not retriggered, and independent `playNote()` voices are unaffected. Seeking while playing resumes from the target, except seeking to the song end stops playback.
 
 **getPlayStatus()**
 > get current MIDI sequence play status.
