@@ -2,6 +2,8 @@ export as namespace WebAudioTinySynth;
 export = WebAudioTinySynth;
 
 declare class WebAudioTinySynth {
+  /** Parse SMF format 0 or 1 with metrical timing; throws for malformed or unsupported data. */
+  static parseMIDI(data: ArrayBuffer): WebAudioTinySynth.MIDISong;
   constructor(options?: WebAudioTinySynth.Options);
   playNote(options: WebAudioTinySynth.NoteOptions): WebAudioTinySynth.Voice;
   ready(): Promise<void>;
@@ -40,6 +42,18 @@ declare class WebAudioTinySynth {
 }
 
 declare namespace WebAudioTinySynth {
+  interface MIDISong {
+    copyright: string;
+    text: string;
+    /** Initial tempo in BPM; tempo events retain fractional BPM. */
+    tempo: number;
+    /** Ticks per whole note (four times the SMF division). */
+    timebase: number;
+    /** Last End-of-Track tick, including trailing silence. */
+    maxTick: number;
+    /** Sorted by tick, then source track and event order. Tempo messages are [0xff51, BPM]. */
+    ev: { t: number; m: number[] }[];
+  }
   interface TimbrePartial {
     /** 0: output; 1–10: frequency modulation of partial g-1; 11+: gain modulation of partial g-11. Targets must precede this partial. */
     g?: number;

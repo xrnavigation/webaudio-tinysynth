@@ -911,107 +911,11 @@ function WebAudioTinySynthCore(target) {
       this.playing=1;
     },
     loadMIDI:(data)=>{
-      var bytes=new Uint8Array(data), cursor=0, end=bytes.length;
-      function invalid(reason) { throw new Error("Invalid MIDI: "+reason); }
-      function need(length) {
-        if(length>end-cursor) invalid("truncated data");
-      }
-      function read(length) {
-        need(length);
-        var value=0;
-        while(length--) value=value*256+bytes[cursor++];
-        return value;
-      }
-      function variable() {
-        var value=0;
-        for(var count=0;count<4;++count) {
-          var byte=read(1);
-          value=value*128+(byte&127);
-          if(!(byte&128)) return value;
-        }
-        invalid("variable-length value exceeds four bytes");
-      }
-      function text(length) {
-        need(length);
-        var value="";
-        while(length--) value+=String.fromCharCode(bytes[cursor++]);
-        return value;
-      }
-      if(read(4)!==0x4d546864) invalid("missing MThd");
-      var headerLength=read(4);
-      if(headerLength<6) invalid("short header");
-      need(headerLength);
-      read(2); // Format interpretation is unchanged.
-      var tracks=read(2), timebase=read(2)*4;
-      cursor+=headerLength-6;
-      var song={copyright:"",text:"",tempo:120,timebase:timebase,ev:[]};
-      var maxTick=0;
-      for(var track=0;track<tracks;++track) {
-        end=bytes.length;
-        if(read(4)!==0x4d54726b) invalid("missing MTrk");
-        var length=read(4);
-        need(length);
-        end=cursor+length;
-        var tick=0, running=0, ended=false;
-        while(cursor<end) {
-          tick+=variable();
-          var status=read(1);
-          if(status<128) {
-            if(!running) invalid("running status without channel status");
-            --cursor;
-            status=running;
-          }
-          if(status<0xf0) {
-            running=status;
-            var message=[status];
-            var count=(status&0xf0)===0xc0 || (status&0xf0)===0xd0 ? 1 : 2;
-            while(count--) {
-              var value=read(1);
-              if(value>=128) invalid("invalid channel data byte");
-              message.push(value);
-            }
-            song.ev.push({t:tick,m:message});
-          }
-          else {
-            running=0;
-            if(status===0xff) {
-              var type=read(1), size=variable();
-              need(size);
-              if(type===0x2f) {
-                if(size!==0) invalid("invalid End-of-Track length");
-                ended=true;
-                break;
-              }
-              if(type===0x51) {
-                if(size!==3) invalid("invalid tempo length");
-                var tempo=read(3);
-                if(!tempo) invalid("zero tempo");
-                song.ev.push({t:tick,m:[0xff51,Math.floor(60000000/tempo)]});
-              }
-              else if(type===2) song.copyright+=text(size);
-              else if(type===1 || type===3 || type===4 || type===9) song.text=text(size);
-              else cursor+=size;
-            }
-            else if(status===0xf0 || status===0xf7) {
-              var size=variable();
-              need(size);
-              var message=Array.from(bytes.slice(cursor,cursor+size));
-              message.unshift(0xf0);
-              song.ev.push({t:tick,m:message});
-              cursor+=size;
-            }
-            else invalid("unsupported event status");
-          }
-        }
-        if(!ended) invalid("missing End-of-Track");
-        if(tick>maxTick) maxTick=tick;
-        cursor=end;
-      }
-      song.ev.sort(function(x,y){return x.t-y.t});
+      var song=WebAudioTinySynth.parseMIDI(data);
       // Commit only after every track has been validated.
       this.stopMIDI();
       this.song=song;
-      this.maxTick=maxTick;
+      this.maxTick=song.maxTick;
       this.reset();
       this.locateMIDI(0);
     },
@@ -1666,6 +1570,113 @@ class WebAudioTinySynth {
     catch(error){ this.dispose().catch(()=>{}); throw error; }
   }
 }
+
+// Decode SMF data without constructing an audio context or mutating playback.
+WebAudioTinySynth.parseMIDI=function(data) {
+  var bytes=new Uint8Array(data), cursor=0, end=bytes.length;
+  function invalid(reason) { throw new Error("Invalid MIDI: "+reason); }
+  function need(length) {
+    if(length>end-cursor) invalid("truncated data");
+  }
+  function read(length) {
+    need(length);
+    var value=0;
+    while(length--) value=value*256+bytes[cursor++];
+    return value;
+  }
+  function variable() {
+    var value=0;
+    for(var count=0;count<4;++count) {
+      var byte=read(1);
+      value=value*128+(byte&127);
+      if(!(byte&128)) return value;
+    }
+    invalid("variable-length value exceeds four bytes");
+  }
+  function text(length) {
+    need(length);
+    var value="";
+    while(length--) value+=String.fromCharCode(bytes[cursor++]);
+    return value;
+  }
+  if(read(4)!==0x4d546864) invalid("missing MThd");
+  var headerLength=read(4);
+  if(headerLength<6) invalid("short header");
+  need(headerLength);
+  var format=read(2), tracks=read(2), division=read(2);
+  if(format>1) invalid("unsupported SMF format "+format);
+  if(!tracks || (format===0 && tracks!==1)) invalid("invalid track count for SMF format");
+  if(division&0x8000) invalid("SMPTE timing is unsupported");
+  if(!division) invalid("zero time division");
+  var timebase=division*4;
+  cursor+=headerLength-6;
+  var song={copyright:"",text:"",tempo:120,timebase:timebase,ev:[]};
+  var maxTick=0;
+  for(var track=0;track<tracks;++track) {
+    end=bytes.length;
+    if(read(4)!==0x4d54726b) invalid("missing MTrk");
+    var length=read(4);
+    need(length);
+    end=cursor+length;
+    var tick=0, running=0, ended=false;
+    while(cursor<end) {
+      tick+=variable();
+      var status=read(1);
+      if(status<128) {
+        if(!running) invalid("running status without channel status");
+        --cursor;
+        status=running;
+      }
+      if(status<0xf0) {
+        running=status;
+        var message=[status];
+        var count=(status&0xf0)===0xc0 || (status&0xf0)===0xd0 ? 1 : 2;
+        while(count--) {
+          var value=read(1);
+          if(value>=128) invalid("invalid channel data byte");
+          message.push(value);
+        }
+        song.ev.push({t:tick,m:message});
+      }
+      else {
+        running=0;
+        if(status===0xff) {
+          var type=read(1), size=variable();
+          need(size);
+          if(type===0x2f) {
+            if(size!==0) invalid("invalid End-of-Track length");
+            ended=true;
+            break;
+          }
+          if(type===0x51) {
+            if(size!==3) invalid("invalid tempo length");
+            var tempo=read(3);
+            if(!tempo) invalid("zero tempo");
+            song.ev.push({t:tick,m:[0xff51,60000000/tempo]});
+          }
+          else if(type===2) song.copyright+=text(size);
+          else if(type===1 || type===3 || type===4 || type===9) song.text=text(size);
+          else cursor+=size;
+        }
+        else if(status===0xf0 || status===0xf7) {
+          var size=variable();
+          need(size);
+          var message=Array.from(bytes.slice(cursor,cursor+size));
+          message.unshift(0xf0);
+          song.ev.push({t:tick,m:message});
+          cursor+=size;
+        }
+        else invalid("unsupported event status");
+      }
+    }
+    if(!ended) invalid("missing End-of-Track");
+    if(tick>maxTick) maxTick=tick;
+    cursor=end;
+  }
+  song.ev.sort(function(x,y){return x.t-y.t});
+  song.maxTick=maxTick;
+  return song;
+};
 
 if(typeof exports === 'object' && typeof module !== 'undefined'){
   module.exports = WebAudioTinySynth;
