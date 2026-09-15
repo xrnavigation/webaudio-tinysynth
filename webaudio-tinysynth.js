@@ -49,6 +49,7 @@ function WebAudioTinySynthCore(target) {
       this.isReady=0;
       for(const timer of this._timers) clearInterval(timer);
       this._timers.clear();
+      this._cancelMIDILoad();
       for(const request of this._requests){
         request.onload=request.onerror=request.onabort=request.onloadend=null;
         request.abort();
@@ -852,23 +853,58 @@ function WebAudioTinySynthCore(target) {
         return this.drummap[n-35].name;
     },
     loadMIDIfromSrc:()=>{
-      this.loadMIDIUrl(this.src);
+      return this.loadMIDIUrl(this.src).catch(error=>{
+        if(error.name!=="AbortError" && typeof this.dispatchEvent==="function")
+          this.dispatchEvent(new CustomEvent("error",{detail:error}));
+      });
+    },
+    _cancelMIDILoad:()=>{
+      if(this._midiLoad) this._midiLoad();
     },
     loadMIDIUrl:(url)=>{
-      if(!url)
-        return;
-      var xhr=new XMLHttpRequest();
-      xhr.open("GET",url,true);
-      xhr.responseType="arraybuffer";
-      this._requests.add(xhr);
-      xhr.onload=()=>{
-        this._requests.delete(xhr);
-        if(!this._disposed && xhr.status==200){
-          this.loadMIDI(xhr.response);
-        }
-      };
-      xhr.onloadend=()=>this._requests.delete(xhr);
-      xhr.send();
+      if(!url) return Promise.resolve();
+      if(this._disposed) return Promise.reject(new Error("TinySynth is disposed"));
+      this._cancelMIDILoad();
+      return new Promise((resolve,reject)=>{
+        const xhr=new XMLHttpRequest();
+        let finished=false;
+        const abortError=()=>Object.assign(new Error("MIDI load cancelled"),{name:"AbortError"});
+        const settle=(error)=>{
+          if(finished) return;
+          finished=true;
+          this._requests.delete(xhr);
+          if(this._midiLoad===cancel) this._midiLoad=null;
+          xhr.onload=xhr.onerror=xhr.onabort=xhr.ontimeout=xhr.onloadend=null;
+          if(error) reject(error); else resolve();
+        };
+        const cancel=()=>{
+          settle(abortError());
+          xhr.abort();
+        };
+        this._midiLoad=cancel;
+        this._requests.add(xhr);
+        xhr.onload=()=>{
+          if(finished) return;
+          if(xhr.status<200 || xhr.status>=300) {
+            settle(new Error("MIDI load failed: HTTP "+xhr.status));
+            return;
+          }
+          try {
+            // The successful request must not cancel itself in loadMIDI().
+            this._midiLoad=null;
+            this.loadMIDI(xhr.response);
+            settle();
+          } catch(error) { settle(error); }
+        };
+        xhr.onerror=()=>settle(new Error("MIDI load network error"));
+        xhr.ontimeout=()=>settle(new Error("MIDI load timeout"));
+        xhr.onabort=()=>settle(abortError());
+        try {
+          xhr.open("GET",url,true);
+          xhr.responseType="arraybuffer";
+          xhr.send();
+        } catch(error) { settle(error); }
+      });
     },
     reset:()=>{
       for(let i=0;i<16;++i){
@@ -917,6 +953,7 @@ function WebAudioTinySynthCore(target) {
     },
     loadMIDI:(data)=>{
       var song=WebAudioTinySynth.parseMIDI(data);
+      this._cancelMIDILoad();
       // Commit only after every track has been validated.
       this.stopMIDI();
       this.song=song;
@@ -1480,7 +1517,7 @@ function WebAudioTinySynthCore(target) {
     },
   });
   for(const key of Object.keys(target)){
-    if(typeof target[key]==="function" && key[0]!=="_" && key!=="dispose" && key!=="ready"){
+    if(typeof target[key]==="function" && key[0]!=="_" && key!=="dispose" && key!=="ready" && key!=="loadMIDIUrl"){
       const operation=target[key];
       target[key]=(...args)=>{
         if(this._disposed) throw new Error("TinySynth is disposed");

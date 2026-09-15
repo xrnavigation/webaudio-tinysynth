@@ -5,6 +5,7 @@ const song: TinySynth.MIDISong = TinySynth.parseMIDI(Uint8Array.from([
 const lastTick: number = song.maxTick;
 const context = new OfflineAudioContext(2, 48000, 48000);
 const synth = new TinySynth({ audioContext: context, destination: context.destination });
+const download: Promise<void> = synth.loadMIDIUrl('');
 const partial: TinySynth.TimbrePartial = { w: 'sine', v: 0.4, d: 0.7, r: 0.1 };
 synth.setTimbre(0, 0, [partial, { w: 'triangle', g: 1, t: 2, a: 0.01, s: 0.1 }]);
 synth.setTimbre(1, 35, [{ w: 'n0', f: 110, t: 0, h: 0.02, p: 0.1, q: 0.1, k: -1 }]);
