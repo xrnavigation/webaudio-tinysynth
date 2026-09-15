@@ -41,8 +41,8 @@ test('zero-duration SMF plays once and stops even when looping', () => {
 
 test('loop includes the leading rest before simultaneous first events', () => {
   probe([129, 112, 192, 0, 0, 193, 0], [129, 112], `
-    assert.equal(sent.length, 6);
-    sent.forEach((event, i) => assert.ok(Math.abs(event.time - (0.1 + Math.floor(i / 2) * 0.5)) < 1e-9));
+    assert.equal(sent.length, 4);
+    sent.forEach((event, i) => assert.ok(Math.abs(event.time - (0.35 + Math.floor(i / 2) * 0.5)) < 1e-9));
   `);
 });
 

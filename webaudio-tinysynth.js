@@ -745,6 +745,22 @@ function WebAudioTinySynthCore(target) {
           if(this.playing && this.song.ev.length>0){
             let e=this.song.ev[this.playIndex];
             while(this.actx.currentTime+this.preroll>this.playTime){
+              if(!e){
+                if(this.loop && this.maxTick>0){
+                  this.song.tempo=120;
+                  this.tick2Time=4*60/this.song.tempo/this.song.timebase;
+                  e=this.song.ev[this.playIndex=0];
+                  this.playTime+=e.t*this.tick2Time;
+                  this.playTick=e.t;
+                  continue;
+                }
+                // Scheduling ahead must not discard the final rest.
+                if(this.maxTick>0 && this.actx.currentTime<this.playTime)
+                  break;
+                this.playTick=this.maxTick;
+                this.playing=0;
+                break;
+              }
               if(e.m[0]==0xff51){
                 this.song.tempo=e.m[1];
                 this.tick2Time=4*60/this.song.tempo/this.song.timebase;
@@ -753,20 +769,8 @@ function WebAudioTinySynthCore(target) {
                 this.send(e.m,this.playTime);
               ++this.playIndex;
               if(this.playIndex>=this.song.ev.length){
-                if(this.loop && this.maxTick>0){
-                  // Include the final rest before returning to tick zero.
-                  this.playTime+=(this.maxTick-this.playTick)*this.tick2Time;
-                  this.song.tempo=this._loopTempo;
-                  this.tick2Time=4*60/this.song.tempo/this.song.timebase;
-                  e=this.song.ev[this.playIndex=0];
-                  this.playTime+=e.t*this.tick2Time;
-                  this.playTick=e.t;
-                }
-                else{
-                  this.playTick=this.maxTick;
-                  this.playing=0;
-                  break;
-                }
+                this.playTime+=(this.maxTick-this.playTick)*this.tick2Time;
+                e=undefined;
               }
               else{
                 e=this.song.ev[this.playIndex];
@@ -816,6 +820,8 @@ function WebAudioTinySynthCore(target) {
     locateMIDI:(tick)=>{
       let i,p=this.playing;
       this.stopMIDI();
+      tick=Math.max(0,Math.min(tick,this.maxTick));
+      this.song.tempo=120;
       for(i=0;i<this.song.ev.length && tick>this.song.ev[i].t;++i){
         var m=this.song.ev[i];
         var ch=m.m[0]&0xf;
@@ -834,14 +840,8 @@ function WebAudioTinySynthCore(target) {
         if(m.m[0]==0xff51)
           this.song.tempo=m.m[1];
       }
-      if(!this.song.ev[i]){
-        this.playIndex=0;
-        this.playTick=this.maxTick;
-      }
-      else{
-        this.playIndex=i;
-        this.playTick=this.song.ev[i].t;
-      }
+      this.playIndex=i;
+      this.playTick=tick;
       if(p)
         this.playMIDI();
     },
@@ -893,6 +893,8 @@ function WebAudioTinySynthCore(target) {
         this.allSoundOff(i);
     },
     playMIDI:()=>{
+      if(this.playing)
+        return;
       if(!this.song || !this.song.ev.length){
         this.playing=0;
         return;
@@ -904,10 +906,12 @@ function WebAudioTinySynthCore(target) {
       dummy.start(0);
       dummy.stop(this.actx.currentTime+0.001);
       if(this.playTick>=this.maxTick)
-        this.playTick=0,this.playIndex=0;
-      this.playTime=this.actx.currentTime+.1;
-      this._loopTempo=this.song.tempo;
+        this.locateMIDI(0);
       this.tick2Time=4*60/this.song.tempo/this.song.timebase;
+      const next=this.song.ev[this.playIndex];
+      const nextTick=next ? next.t : this.maxTick;
+      this.playTime=this.actx.currentTime+.1+(nextTick-this.playTick)*this.tick2Time;
+      this.playTick=nextTick;
       this.playing=1;
     },
     loadMIDI:(data)=>{
