@@ -992,8 +992,8 @@ function WebAudioTinySynthCore(target) {
           } catch (e) {}
         }
         this._disconnectNode(parts.o[k]);
-        this._disconnectNode(parts.g[k]);
       }
+      for(const gain of parts.g) this._disconnectNode(gain);
     },
     _limitVoices:(ch,n)=>{
       this.notetab.sort(function(n1,n2){
@@ -1032,7 +1032,6 @@ function WebAudioTinySynthCore(target) {
     _buildPartials:(t,n,v,p,f,destination,modulation,bend)=>{
       let out,sc,pn;
       const o=[],g=[],vp=[],fp=[],r=[];
-      const before=new Set(this._nodes);
       try {
       for(let i=0;i<p.length;++i){
         pn=p[i];
@@ -1091,7 +1090,7 @@ function WebAudioTinySynthCore(target) {
       }
       return {o:o,g:g,v:vp,r:r,envelopes:p.map(part=>({...part})),modulation:modulation};
       } catch(error) {
-        for(const node of [...this._nodes]) if(!before.has(node)) this._disconnectNode(node);
+        this._disposePartials({o:o,g:g,modulation:modulation});
         throw error;
       }
     },
