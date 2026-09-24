@@ -1183,6 +1183,14 @@ function WebAudioTinySynthCore(target) {
       nt.e=t+Math.max(...nt.r)*this.releaseRatio;
       nt.f=1;
     },
+    // An earlier key-off replaces a scheduled later one; a later key-off
+    // never extends the note. The pedal still holds keyed-off notes.
+    _keyOff:(nt,t)=>{
+      if(nt.f && !(t<nt.keyOffAt)) return;
+      nt.f=1;
+      nt.keyOffAt=t;
+      if(this.sustain[nt.ch]<64) this._releaseNote(nt,t);
+    },
     setModulation:(ch,v,t,audioTime)=>{
       this.chmod[ch].gain.setValueAtTime(v*100/127,this._tsConv(t,audioTime));
     },
@@ -1221,10 +1229,7 @@ function WebAudioTinySynthCore(target) {
     _allNotesOff:(ch,t,audioTime)=>{
       t=this._tsConv(t,audioTime);
       for(const nt of this.notetab){
-        if(nt.ch===ch && !nt.rhythm && !nt.f && t>=nt.t){
-          nt.f=1;
-          if(this.sustain[ch]<64) this._releaseNote(nt,t);
-        }
+        if(nt.ch===ch && !nt.rhythm && t>=nt.t) this._keyOff(nt,t);
       }
     },
     resetAllControllers:(ch)=>{
@@ -1286,11 +1291,7 @@ function WebAudioTinySynthCore(target) {
       t=this._tsConv(t,audioTime);
       for(let i=this.notetab.length-1;i>=0;--i){
         const nt=this.notetab[i];
-        if(t>=nt.t && nt.ch==ch && nt.n==n && nt.f==0 && !nt.rhythm){
-          nt.f=1;
-          if(this.sustain[ch]<64)
-            this._releaseNote(nt,t);
-        }
+        if(t>=nt.t && nt.ch==ch && nt.n==n && !nt.rhythm) this._keyOff(nt,t);
       }
     },
     noteOn:(ch,n,v,t,audioTime)=>{
