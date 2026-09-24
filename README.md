@@ -140,6 +140,11 @@ public message timestamps use the `performance.now()` millisecond timeline.
 Omitted or zero timestamps mean now. Built-in sequence timing remains in
 AudioContext seconds regardless of this external timestamp mode.
 
+A note-off (or All Notes Off) applies to notes already sounding when it is
+sent. An earlier note-off replaces a scheduled later one; a later note-off does
+not extend the note. A held sustain pedal still defers the release until
+pedal-up.
+
 ```js
 await synth.loadMIDIUrl('./song.mid');
 synth.setLoop(1);
