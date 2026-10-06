@@ -1078,8 +1078,10 @@ function WebAudioTinySynthCore(target) {
         vp[i]=sc*pn.v;
         if(pn.k)
           vp[i]*=Math.pow(2,(n-60)/12*pn.k);
+        // Start silent, not at GainNode's default of 1: a block rendered before
+        // the schedule below applies must not play the partial at full gain.
+        g[i].gain.value=0;
         if(pn.a){
-          g[i].gain.value=0;
           g[i].gain.setValueAtTime(0,t);
           g[i].gain.linearRampToValueAtTime(vp[i],t+pn.a);
         }
