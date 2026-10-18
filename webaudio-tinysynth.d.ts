@@ -3,7 +3,9 @@ export = WebAudioTinySynth;
 
 declare class WebAudioTinySynth {
   /** Parse SMF format 0 or 1 with metrical timing; throws for malformed or unsupported data. */
-  static parseMIDI(data: ArrayBuffer): WebAudioTinySynth.MIDISong;
+  static parseMIDI(data: ArrayBuffer | ArrayBufferView, limits?: WebAudioTinySynth.MIDILimits): WebAudioTinySynth.ParsedMIDISong;
+  /** Encode supported SMF data without an AudioContext. Structured tracks take precedence over ev. */
+  static writeMIDI(song: WebAudioTinySynth.MIDISong, options?: WebAudioTinySynth.MIDIWriteOptions): ArrayBuffer;
   constructor(options?: WebAudioTinySynth.Options);
   playNote(options: WebAudioTinySynth.NoteOptions): WebAudioTinySynth.Voice;
   ready(): Promise<void>;
@@ -53,6 +55,48 @@ declare namespace WebAudioTinySynth {
     maxTick: number;
     /** Sorted by tick, then source track and event order. Tempo messages are [0xff51, BPM]. */
     ev: { t: number; m: number[] }[];
+    /** Optional structured source representation; authoritative for writeMIDI. */
+    tracks?: MIDITrack[];
+    format?: 0 | 1;
+    hasSysEx?: boolean;
+  }
+  interface ParsedMIDISong extends MIDISong {
+    tracks: MIDITrack[];
+    format: 0 | 1;
+    /** SysEx is retained in tracks, never in the playable ev array. */
+    hasSysEx: boolean;
+  }
+  interface MIDITrack {
+    /** Original zero-based track index. Descriptive; array order controls export. */
+    id?: number;
+    /** Last track-name metadata, decoded byte-for-code-unit. Export uses metadata events. */
+    name?: string;
+    /** Includes trailing silence; EOT is emitted here if absent from events. */
+    endTick: number;
+    events: MIDITrackEvent[];
+  }
+  type MIDITrackEvent =
+    | { t: number; kind: 'midi'; message: number[] }
+    | { t: number; kind: 'meta'; type: number; data: number[] }
+    | { t: number; kind: 'sysex'; status: 0xf0 | 0xf7; data: number[] };
+  /** Optional lower limits. Raising a hard ceiling, negative or noninteger values throw. */
+  interface MIDILimits {
+    /** 1 MiB by default. */
+    maxBytes?: number;
+    /** 16 by default. */
+    maxTracks?: number;
+    /** 20,000 physical records, including metadata, SysEx and EOT. */
+    maxEvents?: number;
+    /** 64 KiB total raw metadata payload. */
+    maxMetadataBytes?: number;
+    /** 4 KiB per metadata or SysEx payload. */
+    maxRecordBytes?: number;
+    /** 64 KiB total raw SysEx payload, retained inert. */
+    maxSysExBytes?: number;
+  }
+  interface MIDIWriteOptions extends MIDILimits {
+    /** Default reject. Omit explicitly discards SysEx and retains its elapsed ticks. */
+    sysex?: 'reject' | 'omit';
   }
   interface TimbrePartial {
     /** 0: output; 1–10: frequency modulation of partial g-1; 11+: gain modulation of partial g-11. Targets must precede this partial. */
@@ -83,9 +127,11 @@ declare namespace WebAudioTinySynth {
     quality?: number;
     voices?: number;
   }
-  interface NoteOptions {
-    program: number;
-    note: number;
+  type NoteOptions = NoteTiming & (
+    | { program: number; note: number; percussion?: false }
+    | { percussion: true; note: number; program?: never }
+  );
+  interface NoteTiming {
     velocity?: number;
     gain?: number;
     destination?: AudioNode;

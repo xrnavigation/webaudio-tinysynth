@@ -1097,9 +1097,10 @@ function WebAudioTinySynthCore(target) {
       }
     },
     playNote:(options)=>{
-      const {program,note,velocity=100,gain=1,destination=this.out,startTime=this.actx.currentTime,duration}=options||{};
+      const {program,note,percussion=false,velocity=100,gain=1,destination=this.out,startTime=this.actx.currentTime,duration}=options||{};
       const valid=(value,min,max)=>Number.isFinite(value) && value>=min && value<=max;
-      if(!Number.isInteger(program) || !valid(program,0,127) || !Number.isInteger(note) || !valid(note,0,127) ||
+      if(typeof percussion!=="boolean" || (!percussion && (!Number.isInteger(program) || !valid(program,0,127))) ||
+        (percussion && program!==undefined) || !Number.isInteger(note) || !valid(note,percussion ? 35 : 0,percussion ? 81 : 127) ||
         !Number.isInteger(velocity) || !valid(velocity,0,127) || !valid(gain,0,Number.MAX_VALUE) ||
         !valid(startTime,0,Number.MAX_VALUE) || (duration!==undefined && !valid(duration,0,Number.MAX_VALUE)))
         throw new RangeError("Invalid voice options");
@@ -1148,7 +1149,7 @@ function WebAudioTinySynthCore(target) {
         root=this._createNode("Gain");
         root.gain.value=gain;
         root.connect(destination);
-        parts=this._buildPartials(start,note,velocity,this.program[program].p,440*Math.pow(2,(note-69)/12),root,null,0);
+        parts=this._buildPartials(start,note,velocity,percussion ? this.drummap[note-35].p : this.program[program].p,440*Math.pow(2,(note-69)/12),root,null,0);
         let remaining=parts.o.length;
         for(const oscillator of parts.o) oscillator.onended=()=>{ if(--remaining===0) finish(); };
         this._voices.add(voice);
@@ -1626,8 +1627,31 @@ class WebAudioTinySynth {
 }
 
 // Decode SMF data without constructing an audio context or mutating playback.
-WebAudioTinySynth.parseMIDI=function(data) {
-  var bytes=new Uint8Array(data), cursor=0, end=bytes.length;
+// These hard ceilings also apply to writing. Options can only tighten them.
+function midiLimits(options) {
+  var limits={maxBytes:1048576,maxTracks:16,maxEvents:20000,maxMetadataBytes:65536,maxRecordBytes:4096,maxSysExBytes:65536};
+  for(var key of Object.keys(limits)) {
+    var value=options && options[key];
+    if(value!==undefined) {
+      if(!Number.isSafeInteger(value) || value<0 || value>limits[key])
+        throw new RangeError("Invalid MIDI: invalid "+key+" limit");
+      limits[key]=value;
+    }
+  }
+  return limits;
+}
+WebAudioTinySynth.parseMIDI=function(data,options) {
+  var limits=midiLimits(options);
+  // Check before constructing a view or copying any input-controlled data.
+  var byteLength;
+  if(ArrayBuffer.isView(data)) byteLength=data.byteLength;
+  else {
+    try { byteLength=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,"byteLength").get.call(data); }
+    catch(error) { throw new TypeError("Invalid MIDI: expected ArrayBuffer or view"); }
+  }
+  if(byteLength>limits.maxBytes) throw new RangeError("Invalid MIDI: byte limit exceeded");
+  var bytes=ArrayBuffer.isView(data) ? new Uint8Array(data.buffer,data.byteOffset,data.byteLength) : new Uint8Array(data);
+  var cursor=0, end=bytes.length, eventCount=0, metadataBytes=0, sysExBytes=0;
   function invalid(reason) { throw new Error("Invalid MIDI: "+reason); }
   function need(length) {
     if(length>end-cursor) invalid("truncated data");
@@ -1653,6 +1677,18 @@ WebAudioTinySynth.parseMIDI=function(data) {
     while(length--) value+=String.fromCharCode(bytes[cursor++]);
     return value;
   }
+  function payload(size,sysex) {
+    if(size>limits.maxRecordBytes) invalid("record byte limit exceeded");
+    if(sysex) {
+      sysExBytes+=size;
+      if(sysExBytes>limits.maxSysExBytes) invalid("SysEx byte limit exceeded");
+    } else {
+      metadataBytes+=size;
+      if(metadataBytes>limits.maxMetadataBytes) invalid("metadata byte limit exceeded");
+    }
+    need(size);
+    return Array.from(bytes.subarray(cursor,cursor+size));
+  }
   if(read(4)!==0x4d546864) invalid("missing MThd");
   var headerLength=read(4);
   if(headerLength<6) invalid("short header");
@@ -1660,11 +1696,12 @@ WebAudioTinySynth.parseMIDI=function(data) {
   var format=read(2), tracks=read(2), division=read(2);
   if(format>1) invalid("unsupported SMF format "+format);
   if(!tracks || (format===0 && tracks!==1)) invalid("invalid track count for SMF format");
+  if(tracks>limits.maxTracks) invalid("track limit exceeded");
   if(division&0x8000) invalid("SMPTE timing is unsupported");
   if(!division) invalid("zero time division");
   var timebase=division*4;
   cursor+=headerLength-6;
-  var song={copyright:"",text:"",tempo:120,timebase:timebase,ev:[]};
+  var song={copyright:"",text:"",tempo:120,timebase:timebase,ev:[],format:format,tracks:[],hasSysEx:false};
   var maxTick=0;
   for(var track=0;track<tracks;++track) {
     end=bytes.length;
@@ -1673,8 +1710,12 @@ WebAudioTinySynth.parseMIDI=function(data) {
     need(length);
     end=cursor+length;
     var tick=0, running=0, ended=false;
+    var trackData={id:track,name:"",endTick:0,events:[]};
+    song.tracks.push(trackData);
     while(cursor<end) {
+      if(++eventCount>limits.maxEvents) invalid("event limit exceeded");
       tick+=variable();
+      if(!Number.isSafeInteger(tick)) invalid("tick overflow");
       var status=read(1);
       if(status<128) {
         if(!running) invalid("running status without channel status");
@@ -1691,12 +1732,15 @@ WebAudioTinySynth.parseMIDI=function(data) {
           message.push(value);
         }
         song.ev.push({t:tick,m:message});
+        trackData.events.push({t:tick,kind:"midi",message:message});
       }
       else {
         running=0;
         if(status===0xff) {
           var type=read(1), size=variable();
-          need(size);
+          if(type>=128) invalid("invalid metadata type");
+          var raw=payload(size,false);
+          trackData.events.push({t:tick,kind:"meta",type:type,data:raw});
           if(type===0x2f) {
             if(size!==0) invalid("invalid End-of-Track length");
             ended=true;
@@ -1708,28 +1752,166 @@ WebAudioTinySynth.parseMIDI=function(data) {
             if(!tempo) invalid("zero tempo");
             song.ev.push({t:tick,m:[0xff51,60000000/tempo]});
           }
+          else if(type===0x58) {
+            if(size!==4) invalid("invalid time signature length");
+            cursor+=size;
+          }
           else if(type===2) song.copyright+=text(size);
-          else if(type===1 || type===3 || type===4 || type===9) song.text=text(size);
+          else if(type===1 || type===3 || type===4 || type===9) {
+            song.text=text(size);
+            if(type===3) trackData.name=song.text;
+          }
           else cursor+=size;
         }
         else if(status===0xf0 || status===0xf7) {
           var size=variable();
-          need(size);
-          var message=Array.from(bytes.slice(cursor,cursor+size));
-          message.unshift(0xf0);
-          song.ev.push({t:tick,m:message});
+          var raw=payload(size,true);
+          trackData.events.push({t:tick,kind:"sysex",status:status,data:raw});
+          song.hasSysEx=true;
           cursor+=size;
         }
         else invalid("unsupported event status");
       }
     }
     if(!ended) invalid("missing End-of-Track");
+    trackData.endTick=tick;
     if(tick>maxTick) maxTick=tick;
     cursor=end;
   }
   song.ev.sort(function(x,y){return x.t-y.t});
   song.maxTick=maxTick;
   return song;
+};
+
+// Structured tracks are authoritative when present. The flat legacy form is
+// accepted for callers creating a simple format-0 song without an AudioContext.
+WebAudioTinySynth.writeMIDI=function(song,options) {
+  var limits=midiLimits(options), sysex=options && options.sysex!==undefined ? options.sysex : "reject";
+  function invalid(reason) { throw new Error("Invalid MIDI: "+reason); }
+  if(sysex!=="reject" && sysex!=="omit") invalid("unsupported SysEx policy");
+  function integer(value,min,max,label) {
+    if(!Number.isSafeInteger(value) || value<min || value>max) invalid("invalid "+label);
+    return value;
+  }
+  if(!song || !Number.isSafeInteger(song.timebase) || song.timebase%4) invalid("invalid timebase");
+  var division=integer(song.timebase/4,1,32767,"timebase");
+  var tracks=song.tracks;
+  if(tracks===undefined) {
+    if(!Array.isArray(song.ev) || song.ev.length>limits.maxEvents) invalid("event limit exceeded");
+    var events=[];
+    function legacyText(type,value) {
+      if(!value) return;
+      if(typeof value!=="string" || value.length>limits.maxRecordBytes) invalid("record byte limit exceeded");
+      var data=[];
+      for(var i=0;i<value.length;i++) data.push(integer(value.charCodeAt(i),0,255,"text byte"));
+      events.push({t:0,kind:"meta",type:type,data:data});
+    }
+    legacyText(1,song.text); legacyText(2,song.copyright);
+    if(song.tempo!==undefined && song.tempo!==120 && !song.ev.some(e=>e.t===0 && e.m && e.m[0]===0xff51)) {
+      events.push({t:0,kind:"meta",type:81,data:tempoBytes(song.tempo)});
+    }
+    for(var event of song.ev) {
+      if(!event || !Array.isArray(event.m) || !event.m.length) invalid("invalid message");
+      if(event.m[0]===0xff51) events.push({t:event.t,kind:"meta",type:81,data:tempoBytes(event.m[1])});
+      else if(event.m[0]===0xf0 || event.m[0]===0xf7) {
+        if(event.m.length-1>limits.maxRecordBytes) invalid("record byte limit exceeded");
+        events.push({t:event.t,kind:"sysex",status:event.m[0],data:event.m.slice(1)});
+      } else events.push({t:event.t,kind:"midi",message:event.m});
+    }
+    tracks=[{endTick:song.maxTick,events:events}];
+  }
+  function tempoBytes(bpm) {
+    if(!Number.isFinite(bpm) || bpm<=0) invalid("invalid tempo");
+    var microseconds=integer(Math.round(60000000/bpm),1,0xffffff,"tempo");
+    return [microseconds>>16,(microseconds>>8)&255,microseconds&255];
+  }
+  if(!Array.isArray(tracks) || !tracks.length || tracks.length>limits.maxTracks) invalid("track limit exceeded");
+  var format=song.format===undefined ? (tracks.length===1 ? 0 : 1) : song.format;
+  if((format!==0 && format!==1) || (format===0 && tracks.length!==1)) invalid("invalid SMF format");
+  // Bound the work and every later copy/sort before iterating a caller's arrays.
+  var eventCount=0;
+  for(var track of tracks) {
+    if(!track || !Array.isArray(track.events)) invalid("invalid track events");
+    eventCount+=track.events.length;
+    if(eventCount>limits.maxEvents) invalid("event limit exceeded");
+    // EOT is synthesized for normalized tracks that don't include it.
+    if(!track.events.some(e=>e && e.kind==="meta" && e.type===47)) ++eventCount;
+    if(eventCount>limits.maxEvents) invalid("event limit exceeded");
+  }
+  var output=[], metadataBytes=0, sysExBytes=0;
+  function byte(value) {
+    if(output.length>=limits.maxBytes) invalid("byte limit exceeded");
+    output.push(integer(value,0,255,"byte"));
+  }
+  function fixed(value,count) {
+    for(var shift=(count-1)*8;shift>=0;shift-=8) byte(Math.floor(value/Math.pow(2,shift))&255);
+  }
+  function variable(value) {
+    integer(value,0,0xfffffff,"delta tick");
+    var buffer=[value&127];
+    while((value=Math.floor(value/128))) buffer.unshift((value&127)|128);
+    for(var item of buffer) byte(item);
+  }
+  function dataBytes(data,isSysEx) {
+    if(!Array.isArray(data) || data.length>limits.maxRecordBytes) invalid("record byte limit exceeded");
+    if(isSysEx) {
+      sysExBytes+=data.length;
+      if(sysExBytes>limits.maxSysExBytes) invalid("SysEx byte limit exceeded");
+    } else {
+      metadataBytes+=data.length;
+      if(metadataBytes>limits.maxMetadataBytes) invalid("metadata byte limit exceeded");
+    }
+    variable(data.length);
+    for(var item of data) byte(item);
+  }
+  fixed(0x4d546864,4); fixed(6,4); fixed(format,2); fixed(tracks.length,2); fixed(division,2);
+  for(var track of tracks) {
+    var endTick=integer(track.endTick,0,Number.MAX_SAFE_INTEGER,"end tick");
+    for(var event of track.events) {
+      if(!event) invalid("invalid event");
+      integer(event.t,0,endTick,"event tick");
+    }
+    var events=track.events.slice().sort((a,b)=>a.t-b.t);
+    fixed(0x4d54726b,4);
+    var lengthOffset=output.length; fixed(0,4);
+    var lastTick=0, hasEnd=false;
+    for(var event of events) {
+      if(event.kind==="sysex") {
+        if(sysex==="reject") invalid("SysEx export is unsupported; select sysex:'omit'");
+        if(event.status!==0xf0 && event.status!==0xf7) invalid("invalid SysEx status");
+        if(!Array.isArray(event.data) || event.data.length>limits.maxRecordBytes) invalid("record byte limit exceeded");
+        sysExBytes+=event.data.length;
+        if(sysExBytes>limits.maxSysExBytes) invalid("SysEx byte limit exceeded");
+        for(var value of event.data) integer(value,0,255,"SysEx byte");
+        continue;
+      }
+      if(hasEnd) invalid("events after End-of-Track");
+      variable(event.t-lastTick); lastTick=event.t;
+      if(event.kind==="midi") {
+        var message=event.message;
+        if(!Array.isArray(message)) invalid("invalid channel message");
+        var status=integer(message[0],0x80,0xef,"channel status");
+        var size=(status&0xf0)===0xc0 || (status&0xf0)===0xd0 ? 2 : 3;
+        if(message.length!==size) invalid("invalid channel message length");
+        byte(status);
+        for(var i=1;i<size;i++) byte(integer(message[i],0,127,"channel data"));
+      } else if(event.kind==="meta") {
+        byte(255); byte(integer(event.type,0,127,"metadata type"));
+        var data=event.data;
+        if(event.type===47) {
+          if(!Array.isArray(data) || data.length || event.t!==endTick) invalid("invalid End-of-Track");
+          hasEnd=true;
+        }
+        if(event.type===81 && (!Array.isArray(data) || data.length!==3 || !(data[0]||data[1]||data[2]))) invalid("invalid tempo");
+        if(event.type===88 && (!Array.isArray(data) || data.length!==4)) invalid("invalid time signature");
+        dataBytes(data,false);
+      } else invalid("unsupported event kind");
+    }
+    if(!hasEnd) { variable(endTick-lastTick); byte(255); byte(47); byte(0); }
+    var length=output.length-lengthOffset-4;
+    for(var i=0;i<4;i++) output[lengthOffset+i]=Math.floor(length/Math.pow(256,3-i))&255;
+  }
+  return Uint8Array.from(output).buffer;
 };
 
 if(typeof exports === 'object' && typeof module !== 'undefined'){

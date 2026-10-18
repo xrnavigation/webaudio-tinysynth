@@ -18,16 +18,19 @@ function setup() {
   return { ...h, synth };
 }
 
-test('forward and backward seek reconstruct program, RPN, bend and SysEx state', async () => {
+test('seek reconstructs channel state while imported SysEx remains inert', async () => {
   const { synth } = setup();
   const independent = synth.playNote({ program: 0, note: 64, velocity: 100 });
   synth.locateMIDI(650);
   assert.equal(synth.pg[0], 40);
   assert.equal(synth.tuningF[0], 128);
   assert.ok(synth.bend[0]>100);
-  assert.equal(synth.masterTuningC, 5);
-  assert.equal(synth.scaleTuning[0][0], 0.12);
+  assert.equal(synth.song.hasSysEx, true);
+  assert.equal(synth.masterTuningC, 0);
+  assert.equal(synth.scaleTuning[0][0], 0);
   assert.equal(synth.notetab.length, 0, 'seeking does not sound prior notes');
+  synth.send([240,127,127,4,4,0,69,247]);
+  assert.equal(synth.masterTuningC, 5, 'explicit application SysEx is still supported');
   synth.locateMIDI(0);
   assert.equal(synth.pg[0], 0);
   assert.equal(synth.tuningF[0], 0);
