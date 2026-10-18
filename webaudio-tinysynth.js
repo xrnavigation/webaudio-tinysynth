@@ -1732,7 +1732,7 @@ WebAudioTinySynth.parseMIDI=function(data,options) {
           message.push(value);
         }
         song.ev.push({t:tick,m:message});
-        trackData.events.push({t:tick,kind:"midi",message:message});
+        trackData.events.push({t:tick,kind:"midi",message:message.slice()});
       }
       else {
         running=0;
@@ -1807,7 +1807,7 @@ WebAudioTinySynth.writeMIDI=function(song,options) {
       events.push({t:0,kind:"meta",type:type,data:data});
     }
     legacyText(1,song.text); legacyText(2,song.copyright);
-    if(song.tempo!==undefined && song.tempo!==120 && !song.ev.some(e=>e.t===0 && e.m && e.m[0]===0xff51)) {
+    if(song.tempo!==undefined && song.tempo!==120 && !song.ev.some(e=>e && e.t===0 && e.m && e.m[0]===0xff51)) {
       events.push({t:0,kind:"meta",type:81,data:tempoBytes(song.tempo)});
     }
     for(var event of song.ev) {
@@ -1876,6 +1876,7 @@ WebAudioTinySynth.writeMIDI=function(song,options) {
     var lengthOffset=output.length; fixed(0,4);
     var lastTick=0, hasEnd=false;
     for(var event of events) {
+      if(hasEnd) invalid("events after End-of-Track");
       if(event.kind==="sysex") {
         if(sysex==="reject") invalid("SysEx export is unsupported; select sysex:'omit'");
         if(event.status!==0xf0 && event.status!==0xf7) invalid("invalid SysEx status");
@@ -1885,7 +1886,6 @@ WebAudioTinySynth.writeMIDI=function(song,options) {
         for(var value of event.data) integer(value,0,255,"SysEx byte");
         continue;
       }
-      if(hasEnd) invalid("events after End-of-Track");
       variable(event.t-lastTick); lastTick=event.t;
       if(event.kind==="midi") {
         var message=event.message;

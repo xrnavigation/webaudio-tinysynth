@@ -35,6 +35,8 @@ for (const file of ['webaudio-tinysynth.js','webaudio-tinysynth.min.js']) {
       [0,144,60,100],[240,144,60,0],[240,176,64,0],
     ]);
     assert.equal(song.hasSysEx,false);
+    song.ev.find(e=>e.m[0]===192).m[1]=99;
+    assert.equal(song.tracks[1].events.find(e=>e.kind==='midi').message[1],0);
   });
   test(`${file}: every physical record consumes a budget before retention`, () => {
     for (const limits of [{maxBytes:fixture.byteLength-1},{maxTracks:1},{maxEvents:14},
@@ -67,6 +69,8 @@ for (const file of ['webaudio-tinysynth.js','webaudio-tinysynth.min.js']) {
     assert.throws(()=>Synth.writeMIDI(song),/SysEx/i);
     assert.throws(()=>Synth.writeMIDI(song,{sysex:'omit',maxSysExBytes:2}),/SysEx.*limit/i);
     assert.deepEqual(Array.from(new Uint8Array(Synth.writeMIDI(song,{sysex:'omit'}))),Array.from(new Uint8Array(smf([eot]))));
+    song.tracks[0].events.reverse();
+    assert.throws(()=>Synth.writeMIDI(song,{sysex:'omit'}),/after End-of-Track/i);
   });
   test(`${file}: writer matches independently authored bytes and budgets`, () => {
     // Explicit channel statuses are intentional; running status compression is optional.
@@ -95,6 +99,7 @@ for (const file of ['webaudio-tinysynth.js','webaudio-tinysynth.min.js']) {
     song.tracks[1].events=new Array(20001);
     assert.throws(()=>Synth.writeMIDI(song),/event.*limit/i);
     song.tracks[1].events=events;
+    assert.throws(()=>Synth.writeMIDI({timebase:1920,tempo:100,maxTick:0,ev:new Array(1)}),/Invalid MIDI: invalid message/i);
   });
   test(`${file}: normalized legacy song writes notes and trailing silence without audio`, () => {
     const song={copyright:'',text:'',tempo:120,timebase:1920,maxTick:480,
@@ -141,7 +146,7 @@ test('all independent drums stay silent before onset, cancel tails, and survive 
   assert.ok(audio.getChannelData(0).slice(11025,15000).some(v=>Math.abs(v)>0.001));
   // web-audio-engine stops pulling a modulator when its carrier ends; unlike
   // native WebAudio, it then omits that modulator's scheduled ended callback.
-  // Native Chromium checks natural completion of every stock drum separately.
+  // Native Chromium checks release completion of every stock drum separately.
   voices.forEach(v=>v.stop());
   await Promise.all(voices.map(v=>v.ended));
   assert.equal(synth._nodes.size,baseline);

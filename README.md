@@ -100,6 +100,9 @@ and nonnegative. It scales the voice independently of velocity and timbre.
 `duration` specifies seconds from accepted start to release. Both must be finite
 and nonnegative. Without duration, the voice remains active until released, stopped,
 or its synth is disposed or reconfigured. These times ignore MIDI timestamp mode.
+This also applies to percussion: `duration` begins the selected drum's release
+envelope and may shorten its authored decay. With no duration, call `release()`
+or `stop()` explicitly; silent looping partials otherwise retain the voice.
 
 `release(time?)` defaults to now and evaluates each partial's envelope at release.
 An earlier release can replace a future release; a later repeated release does not
@@ -195,6 +198,11 @@ a synth or AudioContext. Its result contains:
 - `hasSysEx` reports unsupported imported SysEx. It is **excluded from `ev`**;
   loading an SMF never executes its SysEx. Explicit `send` remains available for
   applications deliberately sending supported system messages.
+
+**Import compatibility change:** SMF SysEx tuning, GS reset and other SysEx
+commands no longer run during file playback or seeking. Files relying on those
+commands may sound different. The presence flag lets an importer explain the
+unsupported feature before playback; explicit application `send` is unchanged.
 
 All `t`, `endTick` and `maxTick` values use SMF ticks. `timebase` is ticks per
 whole note: divide by four for PPQ. Text convenience fields decode each raw byte
