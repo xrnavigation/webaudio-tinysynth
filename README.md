@@ -85,14 +85,7 @@ voice.stop();    // immediately silence this voice, including its release tail
 await voice.ended;
 ```
 
-For a melodic voice, program and note are required integer MIDI values 0–127.
-For an independent drum voice, use `{ percussion: true, note: 35, ... }` with a
-drum note from 35–81 and omit `program`. It uses the same start, duration,
-release, stop, destination, gain and completion lifecycle as a melodic voice.
-For example, `synth.playNote({ percussion: true, note: 38, duration: 0.1 })`
-plays an independently owned snare. Both modes capture the selected timbre when
-created, so later program or drum-map edits cannot alter an existing voice.
-Velocity defaults to
+Program and note are required integer MIDI values 0–127. Velocity defaults to
 100, accepts integer values 0–127, and is silent at zero. Gain defaults to 1 and must be finite
 and nonnegative. It scales the voice independently of velocity and timbre.
 
@@ -100,9 +93,6 @@ and nonnegative. It scales the voice independently of velocity and timbre.
 `duration` specifies seconds from accepted start to release. Both must be finite
 and nonnegative. Without duration, the voice remains active until released, stopped,
 or its synth is disposed or reconfigured. These times ignore MIDI timestamp mode.
-This also applies to percussion: `duration` begins the selected drum's release
-envelope and may shorten its authored decay. With no duration, call `release()`
-or `stop()` explicitly; silent looping partials otherwise retain the voice.
 
 `release(time?)` defaults to now and evaluates each partial's envelope at release.
 An earlier release can replace a future release; a later repeated release does not
@@ -179,8 +169,8 @@ leave the current song intact. The latest started URL load wins; a newer request
 successful direct load, or disposal cancels pending loading with an `AbortError`.
 Handle cancellation rejections. An empty URL is a no-op on a live synth.
 
-`WebAudioTinySynth.parseMIDI(arrayBufferOrView, limits?)` parses without creating
-a synth or AudioContext. Its result contains:
+`WebAudioTinySynth.parseMIDI(arrayBuffer)` parses without creating a synth or
+AudioContext. Its result contains:
 
 - `copyright` and `text`.
 - `tempo`: initial 120 BPM.
@@ -188,72 +178,6 @@ a synth or AudioContext. Its result contains:
 - `maxTick`: final End-of-Track tick.
 - `ev`: events shaped `{ t, m }`, sorted by tick, then source track/event order.
   Tempo messages use `[0xff51, BPM]` with fractional precision.
-- `format`: 0 or 1, and `tracks` in original file order. Each track has its
-  zero-based `id`, last `name`, `endTick` and ordered `events`:
-  - `{ t, kind: 'midi', message }` retains channel bytes, including program,
-    controllers, pitch bend and velocity-zero note-on (which means note-off).
-  - `{ t, kind: 'meta', type, data }` retains raw metadata bytes, including
-    track names (type 3), exact tempo microseconds (81), meter (88), and EOT (47).
-  - `{ t, kind: 'sysex', status, data }` retains bounded SysEx bytes inertly.
-- `hasSysEx` reports unsupported imported SysEx. It is **excluded from `ev`**;
-  loading an SMF never executes its SysEx. Explicit `send` remains available for
-  applications deliberately sending supported system messages.
-
-**Import compatibility change:** SMF SysEx tuning, GS reset and other SysEx
-commands no longer run during file playback or seeking. Files relying on those
-commands may sound different. The presence flag lets an importer explain the
-unsupported feature before playback; explicit application `send` is unchanged.
-
-All `t`, `endTick` and `maxTick` values use SMF ticks. `timebase` is ticks per
-whole note: divide by four for PPQ. Text convenience fields decode each raw byte
-to one code unit; they do not guess a text encoding. Use metadata bytes for a
-faithful export or decode them with an application-selected encoding.
-
-Parser and writer hard ceilings (optional limits may lower, never raise them):
-
-| Option | Default ceiling |
-| --- | --- |
-| `maxBytes` | 1,048,576 encoded bytes |
-| `maxTracks` | 16 tracks |
-| `maxEvents` | 20,000 physical records, including metadata, SysEx and EOT |
-| `maxMetadataBytes` | 65,536 raw metadata payload bytes in total |
-| `maxRecordBytes` | 4,096 payload bytes per metadata or SysEx record |
-| `maxSysExBytes` | 65,536 raw SysEx payload bytes in total |
-
-Input byte/track budgets and each declared record length are checked before
-copying its payload. Event counts are checked while parsing, including skipped
-or unsupported records. Invalid limits, malformed records, missing EOT, format 2
-and SMPTE timing throw `Invalid MIDI` errors. Applications should run synchronous
-parsing in a terminable worker when they need cancellation or a wall-time limit.
-
-`WebAudioTinySynth.writeMIDI(song, options?)` returns an `ArrayBuffer` without
-creating an AudioContext. With `song.tracks`, these structured events are
-authoritative; changes to the convenience `ev`, `text`, `name`, `maxTick` or
-`tempo` fields do not override them. Event array order breaks simultaneous-event
-ties. The writer sorts by tick stably, preserves raw metadata/channel events,
-emits explicit channel statuses, and adds EOT at `endTick` when absent. Existing
-EOT must be last and match `endTick`. No track-name metadata is inferred from
-the convenience `name`. Export rejects SysEx by default; `{ sysex: 'omit' }`
-explicitly drops it while retaining the elapsed timeline and EOT silence. The
-same limits bound writing, including omitted SysEx and synthesized EOT records.
-
-For normalized simple songs, omit `tracks` and supply the existing
-`{ copyright, text, tempo, timebase, maxTick, ev }` shape. The writer emits one
-format-0 track from channel messages and `[0xff51, BPM]` tempo events, text and
-copyright; an initial nondefault `tempo` is emitted unless an explicit zero-tick
-tempo exists. For named multitrack compositions and meter maps, build `tracks`
-with metadata records. Each track's `endTick` preserves its trailing silence.
-
-```js
-const song = WebAudioTinySynth.parseMIDI(bytes, { maxTracks: 8 });
-if (song.hasSysEx) console.log('SysEx cannot be rendered by this importer');
-const file = WebAudioTinySynth.writeMIDI(song, { sysex: 'omit' });
-```
-
-Retaining controller or bend events does not add independent voice controller
-or pitch-bend support. Score adapters must validate their required capabilities,
-schedule source-owned gain/pan and releases, and enforce their own admission
-limits; `playNote` never steals or caps independent voices.
 
 ### MIDI API reference
 
